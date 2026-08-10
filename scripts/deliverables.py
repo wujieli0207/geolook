@@ -262,6 +262,7 @@ def execution_plan(slug: str) -> str:
         for t in sorted(open_, key=lambda x: (x["priority"], x["window"])):
             L += [f"**{t['id']} · {t['title']}** ｜ {t['priority']} ｜ {t['window']} ｜ "
                   f"{T.EFFORT.get(t['effort'], t['effort'])}", "",
+                  f"- 依据：{'通用能力建议（非检测故障）' if t.get('basis') == 'capability_recommendation' else '本次证据检测'}",
                   f"- 为什么：{t['why']}", f"- 做什么：{t['action']}",
                   f"- 验收（{'自动' if t['acceptance'].get('type') == 'auto' else '人工'}）："
                   f"{t['acceptance'].get('desc','')}"]

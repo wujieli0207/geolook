@@ -64,9 +64,9 @@ PAGE_EXPECTATIONS = {
     "pricing": {"min_words": 60, "target_h2": 0, "required_blocks": {"数字事实", "对比"}},
     "about": {"min_words": 120, "target_h2": 3, "required_blocks": {"定义"}},
     "docs_index": {"min_words": 40, "target_h2": 2, "required_blocks": set()},
-    "docs_article": {"min_words": 80, "target_h2": 1, "required_blocks": set()},
+    "docs_article": {"min_words": 0, "target_h2": 0, "required_blocks": set()},
     "faq": {"min_words": 120, "target_h2": 1, "required_blocks": {"FAQ"}},
-    "collection": {"min_words": 80, "target_h2": 1, "required_blocks": set()},
+    "collection": {"min_words": 0, "target_h2": 0, "required_blocks": set()},
     "article": {"min_words": 500, "target_h2": 3, "required_blocks": set()},
     "landing": {"min_words": 400, "target_h2": 3, "required_blocks": {"定义", "数字事实", "对比"}},
 }
@@ -312,13 +312,13 @@ def score_page(page: dict, keywords: list[str]) -> dict:
         if min_words and wc < min_words:
             issue(
                 "THIN_CONTENT",
-                f"P1 正文少于该页面类型的完整性参考值（{kind}: {min_words} 词）；优先补任务所需事实，不按统一长文阈值扩写",
+                f"P2 正文少于该页面类型的内容长度参考值（{kind}: {min_words} 词）；这是观察信号，需按页面任务人工复核，不自动判为缺陷",
             )
     else:
         s += 1
         issue(
             "THIN_CONTENT",
-            "P1 HTML 有少量可读正文，但信息不足；这是 thin content，不足以据此断言 CSR/SPA 空壳",
+            "P2 HTML 有少量可读正文；这是 thin-content 观察信号，不足以据此断言任务不完整或 CSR/SPA 空壳",
         )
     d["可抓取性"] = s
 
@@ -390,12 +390,16 @@ def score_page(page: dict, keywords: list[str]) -> dict:
 
     # 5. 权威信号 15
     s = 0.0
-    if RE_DATE.search(text) or jsonld_has_key(page.get("jsonld_raw"), {"dateModified", "datePublished"}):
-        s += 4
+    if kind == "article":
+        if RE_DATE.search(text) or jsonld_has_key(page.get("jsonld_raw"), {"dateModified", "datePublished"}):
+            s += 4
+        else:
+            issue("NO_DATE", "P1 文章没有可见的发布/更新日期，时效性无法判断")
+        if RE_AUTHOR.search(text):
+            s += 2
     else:
-        issue("NO_DATE", "P1 正文没有可见的发布/更新日期，时效性无法判断")
-    if RE_AUTHOR.search(text):
-        s += 2
+        # Pricing / About / Docs / collection 等页面不应机械套文章日期与作者要求。
+        s += 6
     ext = page.get("external_links", 0)
     if kind in {"article", "landing"}:
         s += 4 * band(ext, [(6, 1.0), (3, 0.7), (1, 0.4)])
@@ -701,7 +705,7 @@ def run(slug: str) -> dict:
 
     out = {
         "slug": slug,
-        "scoring_version": "page-kind-v2",
+        "scoring_version": "page-kind-v3",
         "audited_at": G.now_iso(),
         "market": market,
         "site": site,

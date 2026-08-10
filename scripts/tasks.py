@@ -46,13 +46,14 @@ def risk_of(t: dict) -> str:
 
 
 def _t(tid, priority, package, title, why, action, owner, effort, acceptance,
-       market="both", affected=None, window="30天", assets=None):
+       market="both", affected=None, window="30天", assets=None, basis="detected_issue"):
     return {
         "id": tid, "priority": priority, "package": package, "market": market,
         "title": title, "why": why, "action": action,
         "owner": owner, "effort": effort, "window": window,
         "affected": affected or [], "acceptance": acceptance,
         "status": "todo", "assets": assets or [], "evidence": [], "closed_at": None,
+        "basis": basis,
     }
 
 
@@ -273,17 +274,6 @@ def from_audit(audit: dict, cfg: dict, seq) -> list[dict]:
         t["baseline_count"] = len(noquote)
         out.append(t)
 
-    short = [p["url"] for p in pages if _has_issue(p, "THIN_CONTENT", "thin content")]
-    if len(short) >= 3:
-        t = _t(next(seq), "P1", "内容矩阵", "按页面任务补齐核心事实",
-               "这些页面低于各自类型的任务完整性参考值；长页面研究是描述性观察，不构成统一 1000 词门槛",
-               "Pricing 补计划/credits 规则，Docs 补操作与边界，About 补实体事实；只补用户完成任务所需的信息",
-               "内容", "L", {"type": "auto", "check": "pages.no_thin_content",
-                             "desc": "受影响页面不再触发页面类型对应的 THIN_CONTENT"},
-               affected=short[:30])
-        t["baseline_count"] = len(short)
-        out.append(t)
-
     thin_h2 = [p["url"] for p in pages if len(p.get("dimensions", {})) and p["score"] < 70]
     if audit.get("avg_score", 0) < 70:
         out.append(_t(next(seq), "P1", "页面技术", f"站点均分从 {audit.get('avg_score')} 提到 70",
@@ -382,29 +372,26 @@ def from_benchmark(bench: dict, cfg: dict, seq) -> list[dict]:
 
 
 def entity_tasks(cfg: dict, seq) -> list[dict]:
-    """实体消歧与事实底座——永远存在的基础包。"""
-    b = cfg["brand"]
+    """未从审计证据检出的通用能力建议；不得伪装成站点已存在的缺陷。"""
     return [
-        _t(next(seq), "P1", "实体消歧", "统一核心实体事实与定位",
-           "官网各核心页面若对品牌、产品边界和官网域名说法矛盾，会增加实体歧义；措辞无需逐字相同",
-           f"核对「{b['name']}」在首页与 About 的可见正文；若使用 JSON-LD/llms.txt，也必须与可见事实一致，"
-           "但二者不是必填门票",
-           "内容", "S", {"type": "manual", "desc": "核心实体事实一致，无冲突或无法核实的 claims"}),
-        _t(next(seq), "P1", "知识库", "建品牌事实卡并标注证据等级",
-           "所有内容生产的事实底座；无来源的事实一律标待确认（method.md 采样纪律）",
+        _t(next(seq), "P2", "知识库", "能力建议：建品牌事实卡并标注证据等级",
+           "这是内容治理能力建议，不代表审计已检测到事实冲突；无来源的事实应标待确认（method.md 采样纪律）",
            "填 content/facts.md：实体、别名、产品、关键数字、适用与不适用、禁用表达；每条标 A–E",
-           "GEO顾问", "M", {"type": "manual", "desc": "facts.md 存在且每条事实有证据等级"}),
-        _t(next(seq), "P2", "外部证据", "争取真实独立第三方提及",
-           "独立评价与相关生态提及可提供外部佐证，但没有官方保证会带来 LLM citation",
+           "GEO顾问", "M", {"type": "manual", "desc": "facts.md 存在且每条事实有证据等级"},
+           basis="capability_recommendation"),
+        _t(next(seq), "P2", "外部证据", "能力建议：争取真实独立第三方提及",
+           "这是站外权威建设建议；独立评价与相关生态提及可提供外部佐证，但没有官方保证会带来 LLM citation",
            "优先真实用户教程、独立评测与生态伙伴页；只有已满足 notability 与可靠来源要求时才考虑 Wikipedia，"
            "不购买或伪造 mentions", "市场", "M",
-           {"type": "manual", "desc": "获得至少一条可验证、编辑独立的相关第三方提及"}),
-        _t(next(seq), "P1", "监测闭环", "接入 AI 流量归因（渠道组 + 日志 + 来源快照）",
-           "只测「被引用」不测「带来转化」，监测就是汇报表演；AI 来源会话是可见性投入的业务对账单"
+           {"type": "manual", "desc": "获得至少一条可验证、编辑独立的相关第三方提及"},
+           basis="capability_recommendation"),
+        _t(next(seq), "P1", "监测闭环", "能力建议：接入 AI 流量归因（渠道组 + 日志 + 来源快照）",
+           "这是衡量业务结果的能力建议，不代表审计已检测到现有归因实现缺失；AI 来源会话可作为可见性投入的业务对账单"
            "（references/attribution.md）",
            "用 `geo.py generate --asset attribution` 产出配置包：GA4 建「AI 引擎」渠道组、"
            "服务器日志跑统计脚本、转化事件保存来源快照。报告口径写「可归因 ≥ N」，不外推",
-           "开发", "S", {"type": "manual", "desc": "渠道组已建、日志脚本可跑、转化事件带来源快照（人工确认）"}),
+           "开发", "S", {"type": "manual", "desc": "渠道组已建、日志脚本可跑、转化事件带来源快照（人工确认）"},
+           basis="capability_recommendation"),
     ]
 
 

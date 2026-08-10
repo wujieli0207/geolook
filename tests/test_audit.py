@@ -51,7 +51,7 @@ class TestIssueCodes(unittest.TestCase):
         ), [])
         self.assertIn("SPA_SHELL", r["issue_codes"])
 
-    def test_short_static_docs_is_thin_not_spa(self):
+    def test_short_static_docs_is_not_spa_or_automatic_thin_fault(self):
         text = ("Getting Started\nCreate a video\nChoose a model, add a prompt, and submit. "
                 "Review the displayed credit cost, follow progress in History, and download the result. " * 3)
         r = A.score_page(make_page(
@@ -59,7 +59,9 @@ class TestIssueCodes(unittest.TestCase):
             h1=["Getting Started"], h2=["Create a video"], para_count=4, li_count=3,
         ), [])
         self.assertNotIn("SPA_SHELL", r["issue_codes"])
-        self.assertIn("THIN_CONTENT", r["issue_codes"])
+        self.assertNotIn("THIN_CONTENT", r["issue_codes"])
+        self.assertNotIn("NO_DATE", r["issue_codes"])
+        self.assertNotIn("FEW_H2", r["issue_codes"])
 
     def test_streamed_structure_is_rendering_risk_not_spa(self):
         r = A.score_page(make_page(
@@ -233,12 +235,26 @@ class TestAvgScore(unittest.TestCase):
 class TestJsonldDate(unittest.TestCase):
     def test_date_modified_in_jsonld_counts(self):
         raw = [{"@type": "Article", "dateModified": "2026-01-01"}]
-        r = A.score_page(make_page(text=SPA_TEXT * 1, jsonld_raw=raw), [])
+        r = A.score_page(make_page(
+            url="https://example.com/blog/example", text=SPA_TEXT * 1,
+            jsonld_types=["Article"], jsonld_raw=raw,
+        ), [])
         self.assertNotIn("NO_DATE", r["issue_codes"])
 
     def test_no_date_anywhere(self):
-        r = A.score_page(make_page(text=SPA_TEXT, jsonld_raw=[{"@type": "Article"}]), [])
+        r = A.score_page(make_page(
+            url="https://example.com/blog/example", text=SPA_TEXT,
+            jsonld_types=["Article"], jsonld_raw=[{"@type": "Article"}],
+        ), [])
         self.assertIn("NO_DATE", r["issue_codes"])
+
+    def test_collection_does_not_require_article_date_or_h2(self):
+        r = A.score_page(make_page(
+            url="https://example.com/blog", text="Recent articles",
+            h1=["Blog"], h2=[], para_count=1, li_count=8,
+        ), [])
+        self.assertNotIn("NO_DATE", r["issue_codes"])
+        self.assertNotIn("FEW_H2", r["issue_codes"])
 
 
 class TestLanguageRecompute(unittest.TestCase):

@@ -64,6 +64,25 @@ class TestFromMetricsNone(unittest.TestCase):
         self.assertFalse(any("无提示提及率" in t["title"] for t in out))
 
 
+class TestTaskBasis(unittest.TestCase):
+    def test_capability_tasks_are_labeled_and_not_entity_faults(self):
+        out = T.entity_tasks(CFG, _seq())
+        self.assertFalse(any(t["title"] == "统一核心实体事实与定位" for t in out))
+        self.assertTrue(out)
+        self.assertTrue(all(t["basis"] == "capability_recommendation" for t in out))
+
+    def test_thin_content_observation_does_not_create_p1_task(self):
+        pages = [{
+            "url": f"https://x.com/docs/p{i}", "score": 75, "word_count": 40,
+            "jsonld_types": [], "issue_codes": ["THIN_CONTENT"],
+            "issues": ["P2 thin content"], "blocks": {},
+        } for i in range(4)]
+        audit = {"site": {"has_sitemap": True, "has_llms_txt": True},
+                 "pages": pages, "avg_score": 75, "block_gap": []}
+        out = T.from_audit(audit, CFG, _seq())
+        self.assertFalse(any(t["acceptance"].get("check") == "pages.no_thin_content" for t in out))
+
+
 class TestMarketAvg(unittest.TestCase):
     def test_none_values_skipped(self):
         m = _metrics({"a": _plat(mention=0.6), "b": _plat(mention=None, cite=None)})
