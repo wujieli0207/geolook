@@ -24,6 +24,12 @@ PRIORITY = [
     "产品", "价格", "方案", "案例", "客户", "文档", "帮助", "关于", "新闻", "博客",
 ]
 
+LOCALE_PREFIXES = {
+    "ar", "cs", "da", "de", "en", "es", "fi", "fr", "he", "hi", "id", "it",
+    "ja", "ko", "ms", "nl", "no", "pl", "pt", "ru", "sv", "th", "tr", "uk",
+    "vi", "zh", "zh-cn", "zh-hans", "zh-hant", "zh-tw",
+}
+
 
 def discover_sitemap(root: str, limit: int = 300) -> list[str]:
     urls: list[str] = []
@@ -83,6 +89,40 @@ def rank(urls: list[str], root: str) -> list[str]:
             continue
         seen.setdefault(u.rstrip("/") or u, u)
     return sorted(seen.values(), key=key)
+
+
+def locale_bucket(url: str) -> str:
+    """从常见 locale path prefix 识别语言桶；无 prefix 的页面归 default。"""
+    segments = [segment.lower() for segment in urlparse(url).path.split("/") if segment]
+    return segments[0] if segments and segments[0] in LOCALE_PREFIXES else "default"
+
+
+def stratified_candidates(ranked_urls: list[str], limit: int) -> list[str]:
+    """在截断前按 locale 轮询取样，避免 /foo 系统性排在 /zh/foo 前面。"""
+    if len(ranked_urls) <= limit:
+        return ranked_urls
+    buckets: "OrderedDict[str, list[str]]" = OrderedDict()
+    for url in ranked_urls:
+        buckets.setdefault(locale_bucket(url), []).append(url)
+    if len(buckets) <= 1:
+        return ranked_urls[:limit]
+
+    selected: list[str] = []
+    positions = {bucket: 0 for bucket in buckets}
+    while len(selected) < limit:
+        progressed = False
+        for bucket, urls in buckets.items():
+            pos = positions[bucket]
+            if pos >= len(urls):
+                continue
+            selected.append(urls[pos])
+            positions[bucket] += 1
+            progressed = True
+            if len(selected) >= limit:
+                break
+        if not progressed:
+            break
+    return selected
 
 
 def analyze_page(url: str, res: dict) -> dict:
@@ -283,7 +323,18 @@ def run(slug: str, max_pages: int | None = None, delay: float = 0.5) -> dict:
     link_urls = discover_links(root, home["html"]) if home["html"] else []
 
     seeds = [u for u in cfg.get("pages", {}).get("seed", []) if u]
-    candidates = rank(seeds + sitemap_urls + link_urls, root)[:limit]
+    ranked_candidates = rank(seeds + sitemap_urls + link_urls, root)
+    candidates = stratified_candidates(ranked_candidates, limit)
+    pool_buckets: dict[str, int] = {}
+    selected_buckets: dict[str, int] = {}
+    for url in ranked_candidates:
+        bucket = locale_bucket(url)
+        pool_buckets[bucket] = pool_buckets.get(bucket, 0) + 1
+    for url in candidates:
+        bucket = locale_bucket(url)
+        selected_buckets[bucket] = selected_buckets.get(bucket, 0) + 1
+    complete_selection = len(ranked_candidates) <= limit
+    locale_stratified = not complete_selection and len(pool_buckets) > 1
 
     def crawl_one(i: int, u: str) -> dict:
         res = home if u.rstrip("/") == root else G.fetch(u)
@@ -348,6 +399,18 @@ def run(slug: str, max_pages: int | None = None, delay: float = 0.5) -> dict:
         "llms_txt_check": llms_check,
         "pages_crawled": len(pages),
         "pages_ok": sum(1 for p in pages if p["status"] == 200),
+        "crawl_selection": {
+            "method": (
+                "complete" if complete_selection
+                else "locale-stratified" if locale_stratified
+                else "ranked-truncated"
+            ),
+            "complete": complete_selection,
+            "locale_stratified": locale_stratified,
+            "candidate_pool_count": len(ranked_candidates),
+            "pool_locale_buckets": pool_buckets,
+            "selected_locale_buckets": selected_buckets,
+        },
     }
     G.write_json(outdir / "site.json", site)
     G.write_jsonl(outdir / "pages.jsonl", pages)

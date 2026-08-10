@@ -118,5 +118,32 @@ class TestAuditDelta(unittest.TestCase):
         self.assertNotIn("↑", out)
 
 
+class TestTodoPrerequisites(unittest.TestCase):
+    def test_unreachable_page_does_not_create_spa_or_content_todos(self):
+        audit = {
+            **AUDIT,
+            "pages": [{
+                "url": "https://www.acme.com/missing",
+                "issues": ["P0 页面不可访问，AI 抓取器同样拿不到"],
+                "issue_codes": ["PAGE_UNREACHABLE"],
+            }],
+        }
+        todos = R.collect_todos(audit)
+        self.assertEqual(len(todos), 1)
+        self.assertEqual(todos[0]["action"], "页面不可访问，AI 抓取器同样拿不到")
+
+    def test_language_scope_is_labeled_as_a_sample(self):
+        audit = {
+            **AUDIT,
+            "language_coverage": {
+                "zh_pages": 5,
+                "en_pages": 5,
+                "sample_scope": "locale-stratified",
+            },
+        }
+        out = R.build_markdown(CFG, audit, None, None, None, [])
+        self.assertIn("抓取样本：locale-stratified", out)
+
+
 if __name__ == "__main__":
     unittest.main()

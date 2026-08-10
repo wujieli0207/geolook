@@ -99,5 +99,21 @@ class TestCrawlerRoles(unittest.TestCase):
         self.assertEqual(result["robots_blocked"], [])
 
 
+class TestLocaleStratifiedCandidates(unittest.TestCase):
+    def test_truncated_bilingual_pool_is_balanced(self):
+        ranked = ["https://example.com/"]
+        ranked.extend(f"https://example.com/tool-{i}" for i in range(9))
+        ranked.extend(f"https://example.com/zh/tool-{i}" for i in range(10))
+        selected = crawl.stratified_candidates(ranked, 6)
+        counts = {"default": 0, "zh": 0}
+        for url in selected:
+            counts[crawl.locale_bucket(url)] += 1
+        self.assertEqual(counts, {"default": 3, "zh": 3})
+
+    def test_non_locale_two_letter_product_prefix_stays_default(self):
+        self.assertEqual(crawl.locale_bucket("https://example.com/ai/tools"), "default")
+        self.assertEqual(crawl.locale_bucket("https://example.com/zh/tools"), "zh")
+
+
 if __name__ == "__main__":
     unittest.main()

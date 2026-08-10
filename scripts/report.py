@@ -186,6 +186,9 @@ def build_markdown(cfg, audit, metrics, prev_m, prev_a, todos) -> str:
         lang_line = f"中文 {lc.get('zh_pages', 0)} 页 / 英文 {lc.get('en_pages', 0)} 页"
         if lc.get("ja_pages", 0) > 0:
             lang_line += f" / 日文 {lc['ja_pages']} 页"
+        scope = lc.get("sample_scope")
+        if scope and scope != "complete":
+            lang_line += f"（抓取样本：{scope}）"
         A(f"| 有效内容页语言 | {lang_line} |")
     A("")
     if audit.get("site_issues"):

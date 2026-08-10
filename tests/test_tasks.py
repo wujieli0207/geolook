@@ -82,6 +82,53 @@ class TestTaskBasis(unittest.TestCase):
         out = T.from_audit(audit, CFG, _seq())
         self.assertFalse(any(t["acceptance"].get("check") == "pages.no_thin_content" for t in out))
 
+    def test_unreachable_page_does_not_generate_spa_task(self):
+        pages = [{
+            "url": "https://x.com/missing", "score": 0, "word_count": 4,
+            "page_kind": "landing", "jsonld_types": [],
+            "issue_codes": ["PAGE_UNREACHABLE"],
+            "issues": ["P0 页面不可访问，AI 抓取器同样拿不到"],
+            "blocks": {}, "required_blocks": [],
+        }]
+        audit = {
+            "site": {"has_sitemap": True, "has_llms_txt": True},
+            "pages": pages, "avg_score": 80, "block_gap": [],
+            "language_coverage": {},
+        }
+        out = T.from_audit(audit, CFG, _seq())
+        self.assertFalse(any(
+            t["acceptance"].get("check") == "pages.static_text" for t in out
+        ))
+
+    def test_legal_page_without_schema_does_not_generate_schema_task(self):
+        pages = [{
+            "url": "https://x.com/privacy-policy", "score": 90, "word_count": 200,
+            "page_kind": "legal", "jsonld_types": [], "issue_codes": [],
+            "issues": [], "blocks": {}, "required_blocks": [],
+        }]
+        audit = {
+            "site": {"has_sitemap": True, "has_llms_txt": True},
+            "pages": pages, "avg_score": 90, "block_gap": [],
+            "language_coverage": {},
+        }
+        out = T.from_audit(audit, CFG, _seq())
+        self.assertFalse(any(
+            t["acceptance"].get("check") == "pages.has_jsonld" for t in out
+        ))
+
+    def test_nonrepresentative_language_sample_does_not_create_balance_task(self):
+        audit = {
+            "site": {"has_sitemap": True, "has_llms_txt": True},
+            "pages": [], "avg_score": 90, "block_gap": [],
+            "language_coverage": {
+                "representative": False, "multilingual": True,
+                "content_pages": 10, "hreflang_pages": 10,
+                "en_pages": 9, "zh_pages": 1,
+            },
+        }
+        out = T.from_audit(audit, {**CFG, "market": "both"}, _seq())
+        self.assertFalse(any("中英对等" in t["title"] for t in out))
+
 
 class TestMarketAvg(unittest.TestCase):
     def test_none_values_skipped(self):

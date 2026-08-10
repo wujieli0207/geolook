@@ -25,6 +25,27 @@ def make_page(url="https://example.com/", text="", wc=None, **kw):
 SPA_TEXT = "加载中"  # 空壳：远低于 120 词
 
 
+def run_audit(pages, *, market="both", site=None):
+    with tempfile.TemporaryDirectory() as d:
+        orig_work = G.WORK
+        G.WORK = Path(d)
+        try:
+            pdir = G.project_dir("audit-test")
+            (pdir / "evidence").mkdir(parents=True)
+            (pdir / "geo.json").write_text(json.dumps(
+                {"brand": {"name": "T", "site": "https://example.com"}, "market": market},
+                ensure_ascii=False,
+            ), "utf-8")
+            G.write_jsonl(pdir / "evidence" / "pages.jsonl", pages)
+            G.write_json(
+                pdir / "evidence" / "site.json",
+                site or {"has_sitemap": True, "has_llms_txt": True},
+            )
+            return A.run("audit-test")
+        finally:
+            G.WORK = orig_work
+
+
 class TestIssueCodes(unittest.TestCase):
     def test_spa_shell_has_code(self):
         r = A.score_page(make_page(
@@ -70,6 +91,20 @@ class TestIssueCodes(unittest.TestCase):
         ), [])
         self.assertNotIn("SPA_SHELL", r["issue_codes"])
         self.assertIn("RENDERING_RISK", r["issue_codes"])
+
+    def test_unreachable_page_stops_before_content_scoring(self):
+        r = A.score_page(make_page(
+            url="https://example.com/missing", status=404, text="404 Page not found",
+            canonical="", h1=["404"], h2=[], para_count=1, li_count=0,
+            jsonld_types=[], external_links=0,
+        ), [])
+        self.assertEqual(r["issue_codes"], ["PAGE_UNREACHABLE"])
+        self.assertEqual(r["status"], 404)
+        self.assertEqual(r["required_blocks"], [])
+        self.assertEqual(r["score"], 0.0)
+        self.assertNotIn("SPA_SHELL", r["issue_codes"])
+        self.assertNotIn("NO_CANONICAL", r["issue_codes"])
+        self.assertNotIn("NO_JSONLD", r["issue_codes"])
 
 
 class TestFaqDetection(unittest.TestCase):
@@ -132,6 +167,23 @@ class TestPageTypeBlocks(unittest.TestCase):
         self.assertTrue(r["blocks"]["对比"])
         self.assertNotIn("NO_NUMBERS", r["issue_codes"])
         self.assertNotIn("NO_COMPARISON", r["issue_codes"])
+
+    def test_legal_pages_do_not_inherit_landing_requirements(self):
+        for path in (
+            "/terms-of-service", "/zh/privacy-policy", "/acceptable-use-policy",
+            "/cookie-policy", "/terms-of-use",
+        ):
+            r = A.score_page(make_page(
+                url=f"https://example.com{path}", text="Policy terms and contact details.",
+                h1=["Policy"], h2=[], para_count=2, li_count=5,
+                jsonld_types=[], external_links=0,
+            ), [])
+            self.assertEqual(r["page_kind"], "legal", path)
+            for code in (
+                "THIN_CONTENT", "NO_DEFINITION", "NO_NUMBERS", "NO_COMPARISON",
+                "NO_QUOTABLE_PASSAGE", "NO_JSONLD", "FEW_EXTERNAL_LINKS", "LOW_RELEVANCE",
+            ):
+                self.assertNotIn(code, r["issue_codes"], path)
 
 
 class TestJapaneseBlocks(unittest.TestCase):
@@ -285,6 +337,85 @@ class TestLanguageRecompute(unittest.TestCase):
         lc = out["language_coverage"]
         self.assertEqual(lc["ja_pages"], 1)
         self.assertEqual(lc["zh_pages"], 1)
+
+
+class TestRepresentativeLanguageCoverage(unittest.TestCase):
+    def _pages(self):
+        pages = [make_page(
+            url="https://example.com/zh", text="这是中文产品与服务说明。" * 30,
+            wc=200, language="zh", hreflang_count=2,
+        )]
+        for i in range(8):
+            pages.append(make_page(
+                url=f"https://example.com/p{i}",
+                text=(f"English product page {i} with useful service details. " * 30),
+                wc=200, language="en", hreflang_count=2,
+            ))
+        return pages
+
+    def test_unknown_sample_scope_does_not_claim_sitewide_imbalance(self):
+        out = run_audit(self._pages())
+        self.assertFalse(out["language_coverage"]["representative"])
+        self.assertFalse(any("严重不对等" in issue for issue in out["site_issues"]))
+
+    def test_locale_stratified_sample_can_emit_imbalance_warning(self):
+        out = run_audit(self._pages(), site={
+            "has_sitemap": True,
+            "has_llms_txt": True,
+            "crawl_selection": {
+                "method": "locale-stratified",
+                "complete": False,
+                "locale_stratified": True,
+            },
+        })
+        self.assertTrue(out["language_coverage"]["representative"])
+        self.assertTrue(any("严重不对等" in issue for issue in out["site_issues"]))
+
+
+class TestDuplicateTitles(unittest.TestCase):
+    def test_cross_language_title_with_hreflang_is_metadata_p2(self):
+        pages = [
+            make_page(
+                url="https://example.com/blog", final_url="https://example.com/blog",
+                canonical="https://example.com/blog", title="Blog | Example",
+                text="English resources and product updates. " * 40, wc=200,
+                language="en", hreflang_count=2,
+            ),
+            make_page(
+                url="https://example.com/zh/blog", final_url="https://example.com/zh/blog",
+                canonical="https://example.com/zh/blog", title="Blog | Example",
+                text="中文资源、产品动态与使用指南。" * 40, wc=200,
+                language="zh", hreflang_count=2,
+            ),
+        ]
+        out = run_audit(pages, site={
+            "has_sitemap": True,
+            "has_llms_txt": True,
+            "crawl_selection": {"method": "complete", "complete": True},
+        })
+        self.assertTrue(any(
+            issue.startswith("P2") and "只需本地化 title" in issue
+            for issue in out["site_issues"]
+        ))
+        self.assertFalse(any(
+            issue.startswith("P1") and "页面标题完全相同" in issue
+            for issue in out["site_issues"]
+        ))
+        self.assertEqual(out["scoring_version"], "page-kind-v4")
+
+    def test_same_language_duplicate_title_remains_p1(self):
+        pages = [make_page(
+            url=f"https://example.com/article-{i}",
+            final_url=f"https://example.com/article-{i}",
+            canonical=f"https://example.com/article-{i}", title="Same title",
+            text=(f"English article {i} with distinct supporting details. " * 40),
+            wc=200, language="en", hreflang_count=0,
+        ) for i in range(2)]
+        out = run_audit(pages, market="global")
+        self.assertTrue(any(
+            issue.startswith("P1") and "页面标题完全相同" in issue
+            for issue in out["site_issues"]
+        ))
 
 
 if __name__ == "__main__":

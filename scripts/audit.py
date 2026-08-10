@@ -61,6 +61,7 @@ AUTHORITY_SCHEMA = {
 # Pricing / Docs / About 页面都必须 1000+ 词、6 个 H2、五种抽取块齐全。
 PAGE_EXPECTATIONS = {
     "functional": {"min_words": 0, "target_h2": 0, "required_blocks": set()},
+    "legal": {"min_words": 0, "target_h2": 0, "required_blocks": set()},
     "pricing": {"min_words": 60, "target_h2": 0, "required_blocks": {"数字事实", "对比"}},
     "about": {"min_words": 120, "target_h2": 3, "required_blocks": {"定义"}},
     "docs_index": {"min_words": 40, "target_h2": 2, "required_blocks": set()},
@@ -98,6 +99,11 @@ def page_kind(page: dict) -> str:
     types = set(page.get("jsonld_types", []))
     if FUNC_PAGE.search(path):
         return "functional"
+    if re.search(
+        r"/(terms-of-service|terms-of-use|privacy-policy|acceptable-use-policy|cookie-policy)(/|$)",
+        path,
+    ):
+        return "legal"
     if re.search(r"/(pricing|price|plans?)(/|$)", path):
         return "pricing"
     if re.search(r"/(about|company)(/|$)", path):
@@ -268,16 +274,42 @@ def score_page(page: dict, keywords: list[str]) -> dict:
 
     d: dict[str, float] = {}
 
-    # 1. 可抓取性 15
-    s = 0.0
+    # 1. 可抓取性 15。非 200 页面没有可评分的正文；只保留状态证据，
+    # 避免把 404 body 继续误判为 SPA、缺 canonical、内容块或 schema 缺口。
     status = page.get("status") or 0
-    if status == 200:
-        s += 7
-    elif 200 < status < 400:
-        s += 3
-        issue("NON_200_STATUS", "P1 页面返回非 200（如 202/3xx），部分抓取器会直接放弃")
-    else:
-        issue("PAGE_UNREACHABLE", "P0 页面不可访问，AI 抓取器同样拿不到")
+    if status != 200:
+        access_score = 3.0 if 200 < status < 400 else 0.0
+        if 200 < status < 400:
+            issue("NON_200_STATUS", "P1 页面返回非 200（如 202/3xx），部分抓取器会直接放弃")
+        else:
+            issue("PAGE_UNREACHABLE", "P0 页面不可访问，AI 抓取器同样拿不到")
+        dimensions = {
+            "可抓取性": access_score,
+            "内容长度": 0.0,
+            "结构规范": 0.0,
+            "可抽取块": 0.0,
+            "权威信号": 0.0,
+            "对题性": 0.0,
+        }
+        return {
+            "url": page.get("url"),
+            "status": status,
+            "title": page.get("title", "")[:120],
+            "word_count": wc,
+            "page_kind": kind,
+            "score": access_score,
+            "grade": "D",
+            "dimensions": dimensions,
+            "sections_total": 0,
+            "sections_quotable": 0,
+            "blocks": {k: False for k in ("定义", "数字事实", "对比", "操作步骤", "FAQ")},
+            "required_blocks": [],
+            "jsonld_types": sorted(types),
+            "issues": issues,
+            "issue_codes": issue_codes,
+        }
+
+    s = 7.0
     meta_noindex = "noindex" in (page.get("meta_robots") or "").lower()
     header_noindex = "noindex" in (page.get("x_robots_tag") or "").lower()
     if not (meta_noindex or header_noindex):
@@ -295,9 +327,9 @@ def score_page(page: dict, keywords: list[str]) -> dict:
     else:
         issue("NO_CANONICAL", "P2 缺 canonical，重复内容会稀释信号")
     semantic_nodes = len(h1) + len(h2) + paras + lis + (page.get("table_count", 0) or 0)
-    if kind == "functional":
+    if kind in {"functional", "legal"}:
         s += 3
-        if wc < 30:
+        if kind == "functional" and wc < 30:
             issue("LOW_CONTENT_PAGE", "P2 低内容功能页，内容少属正常；只需确认关键状态与说明可访问")
     elif wc < 10 and semantic_nodes <= 2:
         issue("SPA_SHELL", "P0 HTML 几乎没有正文或语义节点，疑似 CSR/SPA 空壳；需用 rendered page 与原始响应复核")
@@ -383,7 +415,7 @@ def score_page(page: dict, keywords: list[str]) -> dict:
     # 4b. 段落级可引：检索按段落选材，页面长 ≠ 有可引之材
     segs = split_sections(text, h2)
     q_n = sum(1 for sg in segs if quotable(sg))
-    if len(segs) >= 3 and wc >= 300 and q_n == 0:
+    if kind != "legal" and len(segs) >= 3 and wc >= 300 and q_n == 0:
         issue("NO_QUOTABLE_PASSAGE",
               "P1 整页没有一个可独立引用的段落——每段要么太短、要么没有数字/定义/步骤等硬信息；"
               "检索是按段落选材的，先把 2–3 个核心段落改成自包含的证据段")
@@ -408,9 +440,12 @@ def score_page(page: dict, keywords: list[str]) -> dict:
     else:
         s += 4
     hit_schema = types & AUTHORITY_SCHEMA
-    s += 5 * band(len(hit_schema), [(3, 1.0), (2, 0.75), (1, 0.45)])
-    if not hit_schema:
-        issue("NO_JSONLD", "P2 未提供适合该页的 JSON-LD 显式线索；结构化数据可帮助消歧，但不是抓取或 AI 排名门票")
+    if kind == "legal":
+        s += 5
+    else:
+        s += 5 * band(len(hit_schema), [(3, 1.0), (2, 0.75), (1, 0.45)])
+        if not hit_schema:
+            issue("NO_JSONLD", "P2 未提供适合该页的 JSON-LD 显式线索；结构化数据可帮助消歧，但不是抓取或 AI 排名门票")
     # schema 与可见内容一致性：声明了 FAQPage 但正文没有可见问答 = 自我声明，
     # 检索系统会拿可见文本对账，对不上时结构化数据反而变成负信号
     if "FAQPage" in types and not RE_FAQ.search(text):
@@ -436,6 +471,7 @@ def score_page(page: dict, keywords: list[str]) -> dict:
     total = round(sum(d.values()), 1)
     return {
         "url": page.get("url"),
+        "status": status,
         "title": page.get("title", "")[:120],
         "word_count": wc,
         "page_kind": kind,
@@ -518,18 +554,25 @@ def run(slug: str) -> dict:
     # 多语言站才要求 hreflang：单语言站声明它没有意义
     multilingual = sum(1 for v in (zh_pages, en_pages, ja_pages) if v > 0) >= 2
 
+    selection = site.get("crawl_selection") or {}
+    language_sample_representative = bool(
+        selection.get("complete") or selection.get("locale_stratified")
+    )
+    language_sample_scope = selection.get("method") or "legacy-unknown"
+
     # 站点级问题
     site_issues = []
     lang_fail = lang_warn = False
-    if market in ("global", "both") and en_pages == 0:
+    if language_sample_representative and market in ("global", "both") and en_pages == 0:
         lang_fail = True
         site_issues.append(
             "P0 抓到的页面里没有一页是英文原生内容，海外 AI 引用的可识别语言中英文占 82.90%–95.07%，"
             "翻译腔或中文页几乎进不了候选池")
-    if market in ("cn", "both") and zh_pages == 0:
+    if language_sample_representative and market in ("cn", "both") and zh_pages == 0:
         lang_fail = True
         site_issues.append("P0 抓到的页面里没有中文内容，国内平台无从引用")
-    if market == "both" and en_pages and zh_pages and abs(en_pages - zh_pages) > max(en_pages, zh_pages) * 0.7:
+    if (language_sample_representative and market == "both" and en_pages and zh_pages
+            and abs(en_pages - zh_pages) > max(en_pages, zh_pages) * 0.7):
         thin = "英文" if en_pages < zh_pages else "中文"
         lang_warn = True
         site_issues.append(f"P1 中英内容严重不对等（中文 {zh_pages} 页 / 英文 {en_pages} 页），{thin}侧是明显短板")
@@ -568,25 +611,53 @@ def run(slug: str) -> dict:
     # 重复检测：同题多 URL 会让检索在错误的候选里二选一，「错的那个」可能赢
     #（GEO Readiness Manual：duplicate URL increases the chance the wrong thing survives）
     import hashlib
-    by_title: dict[str, list[str]] = {}
+    by_title_language: dict[tuple[str, str], list[str]] = {}
+    by_title_pages: dict[str, list[dict]] = {}
     by_body: dict[str, list[str]] = {}
     for p in pages:
         if (p.get("status") or 0) != 200 or p.get("word_count", 0) < 120:
             continue
         t = (p.get("title") or "").strip()
         if t:
-            by_title.setdefault(t, []).append(p["url"])
+            lang = p.get("language") or G.page_language(
+                p.get("text") or "", p.get("lang") or ""
+            )
+            by_title_language.setdefault((t, lang), []).append(p["url"])
+            by_title_pages.setdefault(t, []).append(p)
         body_key = hashlib.md5(
             re.sub(r"\s+", "", (p.get("text") or "")[:600]).encode()).hexdigest()
         by_body.setdefault(body_key, []).append(p["url"])
-    # 多语言站的不同语言版本标题几乎必不同，正文前段也不同，误报风险低
-    dup_titles = [(t, us) for t, us in by_title.items() if len(us) > 1]
+    dup_titles = [
+        (t, us) for (t, _lang), us in by_title_language.items() if len(us) > 1
+    ]
+    localized_title_duplicates = []
+    for title, title_pages in by_title_pages.items():
+        langs = {
+            p.get("language") or G.page_language(p.get("text") or "", p.get("lang") or "")
+            for p in title_pages
+        }
+        if len(langs) < 2:
+            continue
+        correctly_localized = all(
+            p.get("hreflang_count", 0) > 0
+            and bool(p.get("canonical"))
+            and _canon_url_key(urljoin(p.get("url") or "", p.get("canonical") or ""))
+            == _canon_url_key(p.get("final_url") or p.get("url") or "")
+            for p in title_pages
+        )
+        if correctly_localized:
+            localized_title_duplicates.append((title, [p["url"] for p in title_pages]))
     dup_bodies = [us for us in by_body.values() if len(us) > 1]
     if dup_titles:
         ex = dup_titles[0]
         site_issues.append(
             f"P1 {len(dup_titles)} 组页面标题完全相同（如「{ex[0][:40]}」× {len(ex[1])} 个 URL），"
             "同题多 URL 会让检索在错误候选里二选一——合并或用 canonical 指向唯一版本")
+    if localized_title_duplicates:
+        ex = localized_title_duplicates[0]
+        site_issues.append(
+            f"P2 {len(localized_title_duplicates)} 组跨语言页面共用同一标题（如「{ex[0][:40]}」），"
+            "hreflang 与 self-canonical 已正确；只需本地化 title，不要合并或改成同一 canonical")
     if dup_bodies:
         site_issues.append(
             f"P1 {len(dup_bodies)} 组页面正文开头完全一致（近重复内容），例：{dup_bodies[0][0]}"
@@ -679,6 +750,8 @@ def run(slug: str) -> dict:
             ("warn", f"sitemap 含 {site['sitemap_noisy_urls']} 条低价值 URL（索引污染）")
             if site.get("sitemap_noisy_urls") else None,
             ("warn", f"{len(dup_titles)} 组标题重复的页面") if dup_titles else None,
+            ("warn", f"{len(localized_title_duplicates)} 组跨语言页面标题尚未本地化")
+            if localized_title_duplicates else None,
             ("warn", f"{len(dup_bodies)} 组近重复正文的页面") if dup_bodies else None,
         ]),
         layer("understand", "理解", "机器读得懂这是什么实体吗", [
@@ -705,14 +778,16 @@ def run(slug: str) -> dict:
 
     out = {
         "slug": slug,
-        "scoring_version": "page-kind-v3",
+        "scoring_version": "page-kind-v4",
         "audited_at": G.now_iso(),
         "market": market,
         "site": site,
         "language_coverage": {"distribution": lang_dist, "zh_pages": zh_pages,
                               "en_pages": en_pages, "ja_pages": ja_pages,
                               "content_pages": content_pages, "hreflang_pages": hreflang_pages,
-                              "multilingual": multilingual},
+                              "multilingual": multilingual,
+                              "sample_scope": language_sample_scope,
+                              "representative": language_sample_representative},
         "site_issues": site_issues,
         "layers": layers,
         "keywords_used": kws,

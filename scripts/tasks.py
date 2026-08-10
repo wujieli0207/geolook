@@ -162,7 +162,8 @@ def from_audit(audit: dict, cfg: dict, seq) -> list[dict]:
 
     # 语言覆盖（双市场必查）
     lc = audit.get("language_coverage") or {}
-    if lc.get("multilingual") and lc.get("content_pages") \
+    representative_language_sample = bool(lc.get("representative"))
+    if representative_language_sample and lc.get("multilingual") and lc.get("content_pages") \
             and lc.get("hreflang_pages", 0) / lc["content_pages"] < 0.3:
         out.append(_t(next(seq), "P1", "页面技术", "多语言页面补 hreflang 声明",
                       f"多语言站但只有 {lc.get('hreflang_pages', 0)}/{lc['content_pages']} 个内容页"
@@ -171,13 +172,14 @@ def from_audit(audit: dict, cfg: dict, seq) -> list[dict]:
                       "与 canonical 保持一致", "开发", "M",
                       {"type": "auto", "check": "site.hreflang_gte:0.5",
                        "desc": "内容页 hreflang 覆盖率 ≥ 50%"}))
-    if market in ("global", "both") and lc.get("en_pages", 0) == 0:
+    if representative_language_sample and market in ("global", "both") and lc.get("en_pages", 0) == 0:
         out.append(_t(next(seq), "P0", "内容矩阵", "建英文原生内容区",
                       "海外 AI 引用的可识别语言里英文占 82.90%–95.07%，机翻页进不了候选池（global-platforms.md）",
                       "至少 8 个英文原生页面：首页、产品、定价、对比、FAQ、案例 ×3。不是翻译中文页",
                       "内容", "L", {"type": "auto", "check": "site.en_pages_gte:8",
                                     "desc": "英文有效内容页 ≥ 8"}, market="global"))
-    elif market == "both" and lc.get("en_pages", 0) and lc.get("zh_pages", 0):
+    elif (representative_language_sample and market == "both"
+          and lc.get("en_pages", 0) and lc.get("zh_pages", 0)):
         en, zh = lc["en_pages"], lc["zh_pages"]
         if abs(en - zh) > max(en, zh) * 0.7:
             thin = "英文" if en < zh else "中文"
