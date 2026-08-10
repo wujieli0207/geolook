@@ -16,16 +16,18 @@ CFG = {
 
 
 def make_row(platform="deepseek", qid="Q1", rnd=1, mode="api",
-             question="有什么好用的工具？", mentioned=True, probe=False):
+             question="有什么好用的工具？", mentioned=True, probe=False,
+             search_enabled=False, own_cited=False):
     return {
         "platform": platform, "question_id": qid, "round": rnd, "sample_mode": mode,
         "question": question, "market": "cn", "ok": True,
         "brand_in_question": probe,
+        "search_enabled": search_enabled,
         "analysis": {
             "brand_mentioned": mentioned,
             "brand_rank": 1 if mentioned else 0,
             "candidates": [], "competitors_mentioned": [], "cited_domains": [],
-            "own_domain_cited": False, "answer_chars": 10,
+            "own_domain_cited": own_cited, "answer_chars": 10,
         },
     }
 
@@ -93,6 +95,38 @@ class TestProbeNoFallback(unittest.TestCase):
         self.assertEqual(m["samples"], 2)
         self.assertEqual(m["mention_rate"], 0.5)
         self.assertEqual(m["probe"]["samples"], 1)
+
+
+class TestAmbiguousBrandQuestion(unittest.TestCase):
+    def test_generic_ai_fruit_phrase_is_not_brand_probe(self):
+        cfg = {"brand": {"name": "AI Fruit", "aliases": [], "site": "https://aifruit.app"},
+               "competitors": [], "questions": []}
+        self.assertFalse(S.brand_in_question(
+            "What's a free alternative to an AI fruit video creator?", cfg))
+        self.assertTrue(S.brand_in_question("Is AI Fruit legit?", cfg))
+        self.assertTrue(S.brand_in_question("What is aifruit.app?", cfg))
+
+    def test_stale_probe_flag_is_recomputed_from_question(self):
+        cfg = {"brand": {"name": "AI Fruit", "aliases": [], "site": "https://aifruit.app"},
+               "competitors": [], "questions": []}
+        row = make_row(question="What's an AI fruit video creator?", probe=True)
+        m = S.aggregate([row], cfg)["deepseek"]
+        self.assertEqual(m["samples"], 1)
+        self.assertEqual(m["probe"]["samples"], 0)
+
+
+class TestCitationEligibility(unittest.TestCase):
+    def test_closed_book_samples_do_not_become_zero_percent_citations(self):
+        m = S.aggregate([make_row(search_enabled=False, own_cited=False)], CFG)["deepseek"]
+        self.assertEqual(m["citation_samples"], 0)
+        self.assertIsNone(m["own_domain_cite_rate"])
+
+    def test_only_search_enabled_rows_form_citation_denominator(self):
+        rows = [make_row(qid="Q1", search_enabled=False, own_cited=False),
+                make_row(qid="Q2", search_enabled=True, own_cited=True)]
+        m = S.aggregate(rows, CFG)["deepseek"]
+        self.assertEqual(m["citation_samples"], 1)
+        self.assertEqual(m["own_domain_cite_rate"], 1.0)
 
 
 class TestMarketOf(unittest.TestCase):

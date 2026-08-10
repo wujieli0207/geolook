@@ -92,7 +92,7 @@ PROVIDERS = {
         "note": "OpenAI 兼容端点不带 grounding；Google AI Overview 要在网页端采",
     },
     "openai": {
-        "name": "OpenAI(ChatGPT)", "market": "global",
+        "name": "OpenAI API", "market": "global",
         "base": os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1"),
         "model": "gpt-4o-mini",
         "model_env": "OPENAI_MODEL",
@@ -419,7 +419,19 @@ def brand_in_question(question: str, cfg: dict) -> bool:
     host = urlparse(b.get("site", "")).netloc.lower().removeprefix("www.")
     if host and host in question.lower():
         return True
-    return any(n and n.lower() in question.lower() for n in names)
+    for n in names:
+        if not n:
+            continue
+        # 多词 Latin 品牌很容易同时是普通品类短语（如 AI Fruit）。对这类名字，
+        # canonical capitalization 才视为明确点名；"an AI fruit video creator"
+        # 不能因为大小写不敏感的子串匹配而被误归为品牌题。
+        if " " in n and re.fullmatch(r"[A-Za-z0-9 .&+_-]+", n):
+            if re.search(rf"(?<![A-Za-z0-9]){re.escape(n)}(?![A-Za-z0-9])", question):
+                return True
+            continue
+        if _entity_hit(question, [n])[0] >= 0:
+            return True
+    return False
 
 
 def analyze_answer(answer: str, cfg: dict, citations: list | None = None) -> dict:
@@ -487,8 +499,13 @@ def aggregate(rows: list[dict], cfg: dict) -> dict:
     for plat, all_rs in by_platform.items():
         # 点名品牌的问题（品牌验证类）不能算进可见性——答案必然复述品牌名。
         # 它们单独统计成「品牌认知」：AI 到底知不知道这个品牌、说得对不对。
-        probe = [r for r in all_rs if r.get("brand_in_question")
-                 or brand_in_question(r.get("question", ""), cfg)]
+        # question 文本是可重算的 source of truth；旧样本里的 brand_in_question
+        # 可能来自旧版误判，只在缺 question 时回退旧字段。
+        probe = [
+            r for r in all_rs
+            if (brand_in_question(r.get("question", ""), cfg)
+                if r.get("question") else bool(r.get("brand_in_question")))
+        ]
         rs = [r for r in all_rs if r not in probe]
         # 绝不回退：某平台只采了点名题时，可见性指标就是「未测」（None），
         # 不能把点名样本塞回去凑出 mention_rate=1.0 的假阳性。
@@ -498,29 +515,41 @@ def aggregate(rows: list[dict], cfg: dict) -> dict:
         ranks = [r["analysis"]["brand_rank"] for r in mentioned if r["analysis"]["brand_rank"]]
         comp = {}
         dom = {}
+        citation_rs = [r for r in rs if r.get("search_enabled") is True]
         for r in rs:
             for c in r["analysis"]["competitors_mentioned"]:
                 comp[c] = comp.get(c, 0) + 1
+        for r in citation_rs:
             for d in r["analysis"]["cited_domains"]:
                 dom[d] = dom.get(d, 0) + 1
         out[plat] = {
             "market": market,
             "label": label_of(plat),
             "samples": n,
+            "citation_samples": len(citation_rs),
+            "search_enabled": bool(citation_rs),
             "mention_rate": round(len(mentioned) / n, 3) if n else None,
             "top1_rate": round(sum(1 for r in mentioned if r["analysis"]["brand_rank"] == 1) / n, 3) if n else None,
             "top3_rate": round(sum(1 for r in mentioned if 1 <= r["analysis"]["brand_rank"] <= 3) / n, 3) if n else None,
             "avg_rank": round(sum(ranks) / len(ranks), 2) if ranks else None,
-            "own_domain_cite_rate": (round(sum(1 for r in rs if r["analysis"]["own_domain_cited"]) / n, 3)
-                                     if n and G.has_site(cfg) else None),
+            "own_domain_cite_rate": (
+                round(sum(1 for r in citation_rs if r["analysis"]["own_domain_cited"])
+                      / len(citation_rs), 3)
+                if citation_rs and G.has_site(cfg) else None
+            ),
             "competitor_mentions": dict(sorted(comp.items(), key=lambda x: -x[1])),
             "top_cited_domains": dict(sorted(dom.items(), key=lambda x: -x[1])[:15]),
             # 品牌认知：直接点名品牌时，AI 认不认识、有没有引到官网
             "probe": {
                 "samples": len(probe),
                 "recognized_rate": round(sum(1 for r in probe if r["analysis"]["brand_mentioned"]) / len(probe), 3) if probe else None,
-                "own_domain_cite_rate": (round(sum(1 for r in probe if r["analysis"]["own_domain_cited"]) / len(probe), 3)
-                                          if probe and G.has_site(cfg) else None),
+                "own_domain_cite_rate": (
+                    round(sum(1 for r in probe if r.get("search_enabled") is True
+                              and r["analysis"]["own_domain_cited"])
+                          / sum(1 for r in probe if r.get("search_enabled") is True), 3)
+                    if any(r.get("search_enabled") is True for r in probe) and G.has_site(cfg)
+                    else None
+                ),
             },
         }
     return out
@@ -589,6 +618,7 @@ def run(slug: str, platforms: list[str] | None = None, repeat: int = 1, limit: i
             "market": market_of(plat), "terminal": "api", "sample_mode": "api",
             "evidence_level": "B_api_可复现",
             "search_enabled": res.get("searched", PROVIDERS[plat].get("search", False)),
+            "raw_model": res.get("raw_model"),
             "question_id": q.get("id"), "question": q["text"], "round": rnd,
             "brand_in_question": brand_in_question(q["text"], cfg),
             "ok": res["ok"], "error": res.get("error"),

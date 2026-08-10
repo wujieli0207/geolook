@@ -40,6 +40,9 @@ def _load(slug: str):
 def optimization_plan(slug: str) -> str:
     cfg, audit, metrics, bp, td = _load(slug)
     b = cfg["brand"]
+    has_web_metrics = bool(metrics and any(
+        v.get("search_enabled") for v in metrics.get("platforms", {}).values()
+    ))
     mk = {"cn": "国内", "global": "海外", "both": "国内 + 海外"}.get(cfg.get("market"))
     L = [f"# {b['name']} · GEO 优化方案", "",
          f"编制日期 {G.today()} ｜ 服务范围 **{mk}** AI 搜索可见性 ｜ 官网 {b['site']}", "",
@@ -51,7 +54,7 @@ def optimization_plan(slug: str) -> str:
     gd = audit.get("grade_distribution", {})
     ab = (gd.get("A", 0) + gd.get("B", 0))
     L += [f"- 站点均分 **{score}**（满分 100，70 分以上算「基本可用」）",
-          f"- 抓取 {audit.get('page_count')} 页，其中可直接被引用或基本可用的 **{ab}** 页", ""]
+          f"- 抓取 {audit.get('page_count')} 个 canonical 页面，其中启发式检查为 A/B 的 **{ab}** 页", ""]
 
     if metrics:
         for m_, name in (("cn", "国内"), ("global", "海外")):
@@ -63,7 +66,8 @@ def optimization_plan(slug: str) -> str:
             oc_v = [v["own_domain_cite_rate"] for v in rows if v.get("own_domain_cite_rate") is not None]
             mr = f"{sum(mr_v)/len(mr_v):.0%}" if mr_v else "未测"
             oc = f"{sum(oc_v)/len(oc_v):.0%}" if oc_v else "未测"
-            L.append(f"- {name}市场：{len(rows)} 个平台端平均**无提示提及率 {mr}**、"
+            scope = "联网端" if any(v.get("search_enabled") for v in rows) else "闭卷 API 快照"
+            L.append(f"- {name}市场：{len(rows)} 个平台端（{scope}）平均**无提示提及率 {mr}**、"
                      f"引用官网率 {oc}")
         L.append("")
         L += ["> 「无提示提及率」指问题里不出现品牌名时，AI 主动提到你的比例。",
@@ -75,19 +79,15 @@ def optimization_plan(slug: str) -> str:
 
     site = audit.get("site", {})
     gate = []
-    if site.get("ai_bots_blocked"):
-        gate.append("robots 封禁了 AI 抓取器")
-    if site.get("ai_ua_blocked"):
-        gate.append(f"WAF/CDN 对 {'、'.join(site['ai_ua_blocked'])} 的 UA 拒绝访问（浏览器里看不出来）")
+    by_role = site.get("ai_bots_blocked_by_role") or {}
+    if by_role.get("search"):
+        gate.append("robots 封禁搜索 crawler：" + "、".join(by_role["search"]))
+    elif not by_role and site.get("ai_bots_blocked"):
+        gate.append("robots 有 crawler 封禁（旧口径，需按用途复核）")
     if not site.get("has_sitemap"):
         gate.append("无 sitemap")
-    if not site.get("has_llms_txt"):
-        gate.append("无 llms.txt")
-    elif (site.get("llms_txt_check") or {}).get("broken"):
-        gate.append("llms.txt 里有失效链接")
     spa = sum(1 for p in audit.get("pages", [])
-              if "SPA_SHELL" in p.get("issue_codes", [])
-              or (p.get("issue_codes") is None and p.get("word_count", 0) < 120))
+              if "SPA_SHELL" in p.get("issue_codes", []))
     if spa:
         gate.append(f"{spa} 个页面静态 HTML 无正文")
     L.append(f"| ① 能不能被抓到 | {'／'.join(gate) if gate else '技术底座基本干净'} "
@@ -100,7 +100,7 @@ def optimization_plan(slug: str) -> str:
         own = sum(vals) / len(vals) if vals else None
     if own is None:
         L.append("| ② 会不会被选进引用 | 引用官网率 未测 "
-                 "| 本期没有可见性采样，先补采样再判断，不编数 |")
+                 "| 本期没有联网 citation 样本；闭卷 API 的空 citations 不计 0% |")
     else:
         L.append(f"| ② 会不会被选进引用 | 引用官网率 {own:.0%} "
                  f"| {'官网进不了检索结果，需提交收录 + 在高频被引站点建内容' if own < 0.1 else '维持并扩大外部信源'} |")
@@ -108,22 +108,25 @@ def optimization_plan(slug: str) -> str:
     gaps = audit.get("block_gap", [])
     top_gap = "、".join(f"{g['block']}({g['missing_pages']}/{g['total']})" for g in gaps[:3])
     L.append(f"| ③ 会不会被吸收进答案 | 缺口最大：{top_gap or '—'} "
-             f"| 补可抽取块并把核心页扩到 1000 词以上 |")
+             f"| 按页面任务补关键事实与证据，不机械追 1000 词 |")
     L.append("")
 
-    L += ["## 三、机会地图：按杠杆排序", "",
-          "以下顺序不是主观排的，依据是 CN-GEO 数据集 187,818 条去重引用的实算结果。", ""]
+    L += ["## 三、机会地图：按杠杆排序", ""]
+    if cfg.get("market") == "global":
+        L += ["CN-GEO 数据只作方法背景，不用于推断海外渠道优先级；海外排序应以真实联网 citations 与业务转化为准。", ""]
+    else:
+        L += ["以下顺序参考 CN-GEO 数据集 187,818 条去重引用；仍需结合本站真实联网 citations 验证。", ""]
 
     order = [
         ("门票问题", "P0", gate,
-         "robots、sitemap、llms.txt、SPA 空壳页、结构化数据。这类问题不解决，内容投入收不到效果。"),
-        ("实体消歧与事实底座", "P0", b.get("disambiguation") or [],
-         "让 AI 描述品牌时口径正确。定义句必须在官网首屏、关于页、JSON-LD、llms.txt 四处逐字一致。"),
+         "搜索 crawler、索引资格、sitemap 与真实 SPA 空壳才是门票；llms.txt、训练授权和 JSON-LD 不等同于 Search blocker。"),
+        ("实体消歧与事实底座", "P1", b.get("disambiguation") or [],
+         "让 AI 描述品牌时核心事实一致。首页与 About 的可见正文优先；若使用 JSON-LD/llms.txt，必须与正文一致，但无需四处逐字相同。"),
         ("可抽取块", "P1", [g["block"] for g in gaps if g["missing_pages"] >= max(3, g["total"] * .3)],
-         "实测增益：含数字 +61.6%、定义 +57.3%、对比 +55.3%、how-to +41.2%。"),
+         "研究中观察到数字、定义、对比、how-to 与可见性相关；不是对本站的因果增益保证。"),
         ("外部信源", "P1", [],
-         "**品牌官网类信源只占国内全库引用的 1.37%**——官网是事实源不是引用源。"
-         "把官网从 60 分做到 90 分的边际收益，远低于拿下一个榜单站词条。"),
+         ("国内数据中品牌官网类信源占比较低；对海外项目不能直接外推。先用真实 citations 找到引擎实际信源，"
+          "再争取真实独立评测、用户教程与生态伙伴提及。")),
         ("内容矩阵", "P1", [],
          "每个目标问题需要一种特定形态的内容承接。AI 回答不同问法时找的是不同类型的页面。"),
         ("监测闭环", "P2", [],
@@ -136,14 +139,18 @@ def optimization_plan(slug: str) -> str:
 
     if bp:
         cov = bp["coverage"]
-        L += ["## 四、建设地图：在哪些平台建、建什么内容", "",
-              f"渠道覆盖 **{cov['channel_covered']}/{cov['channel_total']}**"
-              f"（P0/P1 关键渠道 {cov['p0p1_covered']}/{cov['p0p1_total']}）；"
-              f"内容承接 **{cov['content_done']}/{cov['content_total']}**。", "",
-              "完整明细见《GEO 建设地图》。这里只列**最该先补的缺口**：", ""]
+        L += ["## 四、建设地图：在哪些平台建、建什么内容", ""]
+        if not has_web_metrics:
+            L += ["本期没有真实联网 citation 样本，渠道覆盖记为**未测**；不把闭卷 API 的空 citations 当成 0/8 缺口。",
+                  "先完成联网 baseline，再按实际信源决定外部建设。", ""]
+        else:
+            L += [f"本期联网 citation 渠道覆盖 **{cov['channel_covered']}/{cov['channel_total']}**"
+                  f"（P0/P1 关键渠道 {cov['p0p1_covered']}/{cov['p0p1_total']}）；"
+                  f"内容承接 **{cov['content_done']}/{cov['content_total']}**。", "",
+                  "完整明细见《GEO 建设地图》。这里只列**最该先补的缺口**：", ""]
         miss = [c for c in bp["channels"] if not c["covered"] and c["priority"] in ("P0", "P1")]
         miss.sort(key=lambda c: (-(c.get("national") or 0)))
-        if miss:
+        if miss and has_web_metrics:
             L += ["| 渠道 | 优先级 | 建什么 | 节奏 | 数据依据 |", "|---|---|---|---|---|"]
             for c in miss[:8]:
                 ev = []
@@ -160,9 +167,9 @@ def optimization_plan(slug: str) -> str:
         L += ["- **人力只够打一个市场时先打国内**：国内该品类在 AI 认知里往往尚未成型，先定义者得天下；",
               "  海外品类通常已成熟，同样投入下挤进已有候选集要难得多",
               "- 英文内容**必须原生写**，不能机翻中文页——海外 AI 引用的可识别语言里英文占 82.90%–95.07%", ""]
-    L += ["- **不要把预算压在官网重构上**。官网做到「可抓取 + 有定义 + 有结构化数据 + 口径统一」即可，",
+    L += ["- **不要把预算压在官网重构上**。官网先做到「可抓取 + 核心事实可见 + 口径统一」；JSON-LD 只在适合页面补准确线索，",
           "  剩下的力气转到外部信源",
-          "- 内容宁可少而深。1000 词是门槛不是目标——高影响力页面平均 1,943 词，低分页仅 170 词", "",
+          "- 内容宁可少而完整。长页面研究是描述性观察；Pricing、Docs、About 应按各自任务完整度判断，不设统一 1000 词门槛", "",
           "## 六、目标与验收口径", ""]
     tg = cfg.get("targets", {})
     L += ["| 指标 | 当前 | 90 天目标 |", "|---|---|---|",
@@ -171,9 +178,10 @@ def optimization_plan(slug: str) -> str:
         for m_, name in (("cn", "国内"), ("global", "海外")):
             rows = [v for v in metrics["platforms"].values() if v.get("market", "cn") == m_]
             if rows:
-                cur_v = [v["mention_rate"] for v in rows if v.get("mention_rate") is not None]
+                cur_v = [v["mention_rate"] for v in rows
+                         if v.get("search_enabled") and v.get("mention_rate") is not None]
                 cur = f"{sum(cur_v)/len(cur_v):.0%}" if cur_v else "未测"
-                L.append(f"| {name}无提示提及率 | {cur} | {tg.get('mention_rate', .3):.0%} |")
+                L.append(f"| {name}联网端无提示提及率 | {cur} | {tg.get('mention_rate', .3):.0%} |")
     L += [f"| 引用官网率 | {f'{own:.0%}' if own is not None else '未测'} | {tg.get('own_domain_cite_rate', .2):.0%} |", "",
           "## 七、边界", "",
           "- GEO 提升的是**被引用的概率**，不承诺任何平台一定会引用某个页面",
@@ -239,7 +247,7 @@ def execution_plan(slug: str) -> str:
           "| 访问 | 抓取器能拿到内容吗 | 开发 | robots / WAF 白名单 / SSR / noindex |",
           "| 定向 | 找得到、认得清每个 URL 吗 | 开发 | sitemap / canonical / hreflang / llms.txt |",
           "| 理解 | 机器读得懂这是什么实体吗 | 开发 + 内容 | JSON-LD / 定义句逐字一致 / 消歧 |",
-          "| 可引用 | 有值得引用的具体内容吗 | 内容 | 抽取块 / 1000+ 词证据页 / 对题标题 |",
+          "| 可引用 | 有值得引用的具体内容吗 | 内容 | 任务相关抽取块 / 自包含证据段 / 对题标题 |",
           "| 实体权威 | 站外有没有独立佐证 | 市场 | 百科 / 榜单站 / 内容平台 / 权威引用 |", "",
           "> 定位与定价口径、公开承诺由创始人/产品负责人拍板——写进品牌事实卡后各层引用，不各说各话。", ""]
 

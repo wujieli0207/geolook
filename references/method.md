@@ -44,13 +44,13 @@ Google `12.06`、ChatGPT 只有 `6.88`；但 ChatGPT 单条引用的平均影响
 
 | 层 | 问题 | 对应检查 |
 |---|---|---|
-| 访问 | 抓取器能拿到内容吗 | robots 封禁 / WAF-UA 差异封锁 / noindex（meta+响应头）/ SPA 空壳 |
-| 定向 | 找得到、认得清每个 URL 吗 | sitemap（robots 里声明）/ canonical / llms.txt 及其链接有效性 |
-| 理解 | 机器读得懂这是什么实体吗 | JSON-LD / schema 与可见内容一致 / 目标市场原生语言 |
+| 访问 | 抓取器能拿到内容吗 | 搜索 crawler 封禁 / noindex（meta+响应头）/ 已验证的 WAF 拒绝 / 真实 SPA 空壳 |
+| 定向 | 找得到、认得清每个 URL 吗 | sitemap（robots 里声明）/ canonical；llms.txt 仅作实验性辅助索引 |
+| 理解 | 机器读得懂这是什么实体吗 | 可见正文事实 / schema 与可见内容一致 / 目标市场原生语言；JSON-LD 是显式线索而非门票 |
 | 可引用 | 有值得引用的具体内容吗 | 六维里的长度、结构、抽取块、权威、对题 |
 
 **每层依赖上一层：访问失败时，下游层的任何优化在引擎侧都不可见。** 一张有完美 schema
-和高质量内容的页面，如果 WAF 把 GPTBot 挡在门外，等于不存在。工单排序必须从失败的最上游层开始。
+和高质量内容的页面，如果 WAF 把对应的搜索 crawler 挡在门外，检索发现与刷新就会受阻。工单排序必须从失败的最上游层开始。
 `audit.json` 的 `layers` 字段输出每层状态与 `blocked_by`。
 
 ### 可抓取性（15）
@@ -59,11 +59,14 @@ Google `12.06`、ChatGPT 只有 `6.88`；但 ChatGPT 单条引用的平均影响
 - HTTP 200；非 200（含 202/3xx）扣分
 - 无 `noindex`——meta 与 **X-Robots-Tag 响应头**都查。头级 noindex 在页面源码里看不到，
   常是 CDN/中间件全局注入，最容易带病上线
-- **静态 HTML 里要有正文**。默认假设 AI 抓取器不渲染 JS：Googlebot 会渲染但有延迟队列，
-  PerplexityBot / ClaudeBot / GPTBot 按纯 HTML 抓取对待（GEO Readiness Manual 的分爬虫结论）。
-  纯前端渲染的 SPA 对多数 AI 抓取器等于空白页——这是国内官网最常见的致命伤
+- **HTML 响应里应有关键正文**。正文少不等于 SPA：短 Docs/Pricing 可能是完整静态内容，
+  streaming SSR 也可能让抽取器只拿到 skeleton。只有“正文与语义节点都近乎为空”才标 `SPA_SHELL`；
+  有结构但抽取正文异常标 `RENDERING_RISK`，短但可读标 `THIN_CONTENT`
 - 有 canonical，且指向本页而不是别处
-- 站点级：`robots.txt` 不封 `GPTBot / OAI-SearchBot / ClaudeBot / PerplexityBot / Bytespider / Baiduspider / Google-Extended`；有 `sitemap.xml`（并在 robots 里声明）；建议加 `/llms.txt`
+- 站点级：robots 必须按用途分层。`OAI-SearchBot / Claude-SearchBot / PerplexityBot / Googlebot / bingbot`
+  属搜索发现；`ChatGPT-User / Claude-User / Perplexity-User` 属用户触发访问；
+  `GPTBot / ClaudeBot / Google-Extended / Bytespider` 主要是训练或扩展用途。训练授权是内容策略，
+  不等于 AI Search 可见性。有 `sitemap.xml`（并在 robots 里声明）；`/llms.txt` 可实验但不是收录门票
 
 **robots.txt 必须按 RFC 9309 语义判，逐行正则会漏三种真实封禁**（`geolib.robots_parse/robots_decision`）：
 
@@ -72,9 +75,9 @@ Google `12.06`、ChatGPT 只有 `6.88`；但 ChatGPT 单条引用的平均影响
 3. specificity 不看顺序：专属组存在时通配符组整组失效，`User-agent: GPTBot / Allow: /`
    会让 GPTBot 无视通配符组里的任何 `Disallow`
 
-**robots 放行 ≠ 真放行。** WAF/CDN（Cloudflare Bot Fight、阿里云 WAF 等）可能对 AI 爬虫的
-UA 单独返回 403，浏览器里一切正常，站长自己看不出来。`crawl.py` 用 GPTBot / ClaudeBot /
-PerplexityBot / Bytespider 的真实 UA 抓一次首页做差异探测（`ai_ua_probe`）。
+**robots 放行 ≠ 真放行，但 UA-only 探测也不能证明真实 bot 被封。** WAF/CDN 可能同时校验 UA
+与官方 IP。`crawl.py` 从 GeoLook 当前来源换 crawler UA 只做初筛（`ai_ua_probe_denied`）；若返回
+403，必须再用厂商官方 IP + UA 或 CDN/WAF 日志核验，确证后才精确放行，不能直接下“引擎侧不存在”的结论。
 
 **llms.txt 只有指向可抓取的有效页面才有意义。** 指向 404 或被 robots 封禁的路径等于递给
 AI 一份坏地图，`crawl.py` 抽样验证其中链接（`llms_txt_check`）。
@@ -83,8 +86,9 @@ AI 一份坏地图，`crawl.py` 抽样验证其中链接（`llms_txt_check`）�
 > Top 四分位页面平均 **1,943 词**，Bottom 四分位只有 **170 词**，差 `11.4x`。
 > 分段影响力：`≤100 词 = 0.0546`，`1001–3000 词 = 0.1258`，`>3000 词 = 0.1457`。
 
-阈值：`≥1500` 满分 / `≥1000` 85% / `≥600` 60% / `≥300` 35%。
-**1000 词是门槛，不是目标。** 长不是因为字多有价值，而是 AI 需要足够材料才能切出可复用片段。
+这些数字是跨页面的描述性分布，不是通用阈值。评分按 `page_kind` 判断任务完整性：Pricing 看计划与
+credits 规则，Docs 看步骤/输入/输出/失败边界，About 看实体事实，文章/产品页才需要更完整的证据段。
+禁止为了分数把所有页面扩成 1000+ 词。
 
 ### 结构规范（20）
 > Top 四分位：**10.59 个标题、47.49 个段落、列表密度 0.428**；
@@ -112,10 +116,12 @@ AI 一份坏地图，`crawl.py` 抽样验证其中链接（`llms_txt_check`）�
 > 页面类型均值：定义型 `0.1531`、对比型 `0.1524`，而纯 reference 型只有 `0.0529`。
 > **纯 Q&A 格式反而 −5.7%**——"排成问答样子"没有用，有没有定义/数字/结构/对题性才有用。
 
-五块及权重：定义 6、数字事实 6、对比 5、操作步骤 5、FAQ 3。
+五块仍用于识别，但只对适合的页面类型计为 required blocks：Pricing 需要数字与对比，Docs 更关心
+定义/步骤，About 更关心实体定义，FAQ 页才要求 FAQ。`block_gap` 的分母是“需要该块的页面数”，
+不是全站所有页面。上述百分比是观察相关，不是对某站点的因果增益保证。
 
 ### 权威信号（15）
-可见的发布/更新日期、作者、外部引用 ≥ 3 条、JSON-LD 结构化数据。
+可见的发布/更新日期、作者、必要的外部来源、与正文一致且适合页面类型的 JSON-LD。
 > 被引用来源的 `Final_DR` 中位数为 `526–592`，`DR ≥ 500` 的占 `55.67%–68.30%`。
 > 权威度不自动等于高影响力，但它决定你**有没有资格进候选池**。
 
@@ -170,6 +176,8 @@ AI 一份坏地图，`crawl.py` 抽样验证其中链接（`llms_txt_check`）�
 口径纪律：
 
 - **API ≠ 网页端。** DeepSeek 官方 API 不联网，测的是模型参数化知识里的品牌认知；网页端才有检索。两者分开记，绝不合并算提及率。
+- **未联网样本不进入 citation 分母。** `search_enabled=false` 的 API 空 citations 记为“引用未测”，
+  不能报成 0% 官网引用率；提及率仍可作为闭卷模型记忆快照，但不得外推为 AI Search 表现。
 - **Web ≠ App。** CN-GEO 研究发现同一产品不同终端的信源集合有系统性差异。每个平台+终端单独一行。
 - **每平台独立口径**，不允许用一个平台的结论代表"AI 都这么说"。
 - 指标至少四层：提及率、首位率/Top3、描述准确率、引用质量（召回 + 准确）。只看提及率会严重高估效果。

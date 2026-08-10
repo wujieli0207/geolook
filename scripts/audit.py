@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import geolib as G
 
@@ -28,15 +28,25 @@ RE_DEFINITION = re.compile(
 RE_NUMBER = re.compile(
     r"\d[\d,\.]*\s*(%|％|万|亿|千|倍|元|美元|人|家|个|天|小时|分钟|秒|次|条|款|年|月|"
     r"件|社|名|回|億|円|時間|"
-    r"percent|x\b|hours?|days?|users?|customers?)"
+    r"percent|x\b|hours?|days?|users?|customers?|credits?|generations?|dollars?|usd|gb|mb|px|p\b)"
 )
+RE_PRICE = re.compile(r"(?:[$€£]\s*\d|\b\d+(?:\.\d+)?\s*(?:USD|EUR|GBP|credits?)\b)", re.I)
 RE_COMPARE = re.compile(r"(对比|相比|区别|差异|优于|不如|竞品|替代|选型|哪个好|比較|違い|\bvs\.?\b|\bversus\b|\balternatives?\b)", re.I)
 RE_HOWTO = re.compile(r"(第[一二三四五六七八九十\d]+步|步骤\s*[一二三四五六七八九十\d]|操作流程|手順|ステップ\s*\d|使い方|\bstep\s*\d|\bhow to\b)", re.I)
 # 「如何/怎么」只是弱信号，必须与列表结构共现才算操作步骤块（否则问句标题就送分）
 RE_HOWTO_SOFT = re.compile(r"(如何|怎么)")
+RE_INSTRUCTION = re.compile(
+    r"\b(open|choose|select|add|upload|enter|click|start|submit|follow|visit|download|review)\b",
+    re.I,
+)
 # 登录/注册/购物车/联系页等功能页天然低内容，不按 SPA 空壳 P0 误报
 FUNC_PAGE = re.compile(r"/(login|signin|signup|register|cart|checkout|account|auth|contact)(/|$)", re.I)
-RE_FAQ = re.compile(r"(常见问题|常见疑问|问答|よくある質問|\bFAQ\b|^\s*[问Q][:：]|答[:：])", re.I | re.M)
+RE_FAQ = re.compile(
+    r"(常见问题|常见疑问|问答|よくある質問|\bFAQ\b|\bfrequently\s+asked\s+questions?\b"
+    r"|\bcommon\s+questions?\b|\bquestions?\s*(?:&|and)\s*answers?\b"
+    r"|^\s*[问Q][:：]|答[:：])",
+    re.I | re.M,
+)
 RE_DATE = re.compile(r"(20\d{2}[-/年]\s?\d{1,2}[-/月]\s?\d{1,2}|更新[于时间]*[:：]?\s*20\d{2}|最后更新|发布于|\bupdated\b|\bpublished\b)", re.I)
 RE_AUTHOR = re.compile(r"(作者|撰文|编辑[:：]|著者|執筆|\bauthor\b|\bby\s+[A-Z][a-z]+)", re.I)
 
@@ -45,6 +55,93 @@ AUTHORITY_SCHEMA = {
     "FAQPage", "Article", "TechArticle", "NewsArticle", "BlogPosting",
     "HowTo", "BreadcrumbList", "WebSite", "Review", "AggregateRating", "Offer",
 }
+
+
+# 页面类型决定“完整”的含义。相关性研究里的长页面均值不能机械外推成每个
+# Pricing / Docs / About 页面都必须 1000+ 词、6 个 H2、五种抽取块齐全。
+PAGE_EXPECTATIONS = {
+    "functional": {"min_words": 0, "target_h2": 0, "required_blocks": set()},
+    "pricing": {"min_words": 60, "target_h2": 0, "required_blocks": {"数字事实", "对比"}},
+    "about": {"min_words": 120, "target_h2": 3, "required_blocks": {"定义"}},
+    "docs_index": {"min_words": 40, "target_h2": 2, "required_blocks": set()},
+    "docs_article": {"min_words": 80, "target_h2": 1, "required_blocks": set()},
+    "faq": {"min_words": 120, "target_h2": 1, "required_blocks": {"FAQ"}},
+    "collection": {"min_words": 80, "target_h2": 1, "required_blocks": set()},
+    "article": {"min_words": 500, "target_h2": 3, "required_blocks": set()},
+    "landing": {"min_words": 400, "target_h2": 3, "required_blocks": {"定义", "数字事实", "对比"}},
+}
+
+BOT_ROLES = {
+    "Googlebot": "search", "bingbot": "search", "OAI-SearchBot": "search",
+    "Claude-SearchBot": "search", "PerplexityBot": "search", "Baiduspider": "search",
+    "Sogou web spider": "search", "YisouSpider": "search",
+    "ChatGPT-User": "user", "Claude-User": "user", "Perplexity-User": "user",
+    "GPTBot": "training", "ClaudeBot": "training", "Google-Extended": "training",
+    "Bytespider": "training",
+}
+
+
+def blocked_bots_by_role(site: dict) -> dict[str, list[str]]:
+    stored = site.get("ai_bots_blocked_by_role") or {}
+    if stored:
+        return {k: list(stored.get(k) or []) for k in ("search", "user", "training")}
+    blocked = site.get("ai_bots_blocked") or []
+    return {
+        role: [bot for bot in blocked if BOT_ROLES.get(bot) == role]
+        for role in ("search", "user", "training")
+    }
+
+
+def page_kind(page: dict) -> str:
+    """按 URL / schema 做保守的页面类型识别，避免跨类型套同一阈值。"""
+    path = (urlparse(page.get("final_url") or page.get("url") or "").path or "/").lower()
+    types = set(page.get("jsonld_types", []))
+    if FUNC_PAGE.search(path):
+        return "functional"
+    if re.search(r"/(pricing|price|plans?)(/|$)", path):
+        return "pricing"
+    if re.search(r"/(about|company)(/|$)", path):
+        return "about"
+    if re.search(r"/(faq|frequently-asked-questions)(/|$)", path) or "FAQPage" in types:
+        return "faq"
+    if re.search(r"/(docs?|documentation|help)(/)?$", path):
+        return "docs_index"
+    if re.search(r"/(docs?|documentation|help)/", path) or types & {"TechArticle", "HowTo"}:
+        return "docs_article"
+    if re.search(r"/(blog|news|guides?)(/)?$", path):
+        return "collection"
+    if re.search(r"/(blog|news|guides?)/", path) or types & {
+        "Article", "NewsArticle", "BlogPosting"
+    }:
+        return "article"
+    return "landing"
+
+
+def required_blocks_for(page: dict, kind: str) -> set[str]:
+    """根据页面的具体任务选择信息块，避免同一类型内部继续一刀切。"""
+    path = (urlparse(page.get("final_url") or page.get("url") or "").path or "/").lower()
+    required = set(PAGE_EXPECTATIONS[kind]["required_blocks"])
+    if kind == "docs_article" and re.search(r"/(getting-started|quickstart|setup|how-to-)", path):
+        required.add("操作步骤")
+    if kind == "article":
+        if re.search(r"/(what-is-|[^/]*-explained)", path):
+            required.add("定义")
+        if re.search(r"/(?:[^/]*-vs-|[^/]*comparison|[^/]*alternative|[^/]*review)", path):
+            required.add("对比")
+        if re.search(r"/(?:how-to-|[^/]*workflow)", path):
+            required.add("操作步骤")
+    return required
+
+
+def _meaningful_static_content(page: dict) -> bool:
+    """短页面也可能是完整静态 HTML；长度本身不是 CSR/SPA 证据。"""
+    wc = page.get("word_count", 0) or 0
+    semantic_nodes = (
+        len(page.get("h1", [])) + len(page.get("h2", []))
+        + (page.get("para_count", 0) or 0) + (page.get("li_count", 0) or 0)
+        + (page.get("table_count", 0) or 0)
+    )
+    return wc >= 30 and semantic_nodes >= 3
 
 
 def _canon_url_key(u: str) -> str:
@@ -59,6 +156,55 @@ def _canon_mismatch(canonical: str, actual: str) -> bool:
     if not canonical.startswith("http"):
         return False  # 相对 canonical，不猜
     return _canon_url_key(canonical) != _canon_url_key(actual)
+
+
+def _page_canonical_key(page: dict) -> str:
+    """返回页面的规范身份；只有声明 canonical 时才主动忽略 query。"""
+    actual = page.get("final_url") or page.get("url") or ""
+    canonical = (page.get("canonical") or "").strip()
+    if canonical:
+        return _canon_url_key(urljoin(actual, canonical))
+    p = urlparse(actual)
+    host = p.netloc.lower().removeprefix("www.")
+    path = (p.path or "/").rstrip("/") or "/"
+    return f"{host}{path}?{p.query}" if p.query else f"{host}{path}"
+
+
+def dedupe_pages_by_canonical(pages: list[dict]) -> tuple[list[dict], list[dict]]:
+    """按 canonical 折叠重复抓取行，并优先保留规范 URL 本身。"""
+    groups: dict[str, list[dict]] = {}
+    order: list[str] = []
+    for page in pages:
+        key = _page_canonical_key(page)
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(page)
+
+    kept: list[dict] = []
+    duplicates: list[dict] = []
+    for key in order:
+        group = groups[key]
+
+        def preference(page: dict):
+            actual = page.get("final_url") or page.get("url") or ""
+            parsed = urlparse(actual)
+            return (
+                (page.get("status") or 0) == 200,
+                _canon_url_key(actual) == key,
+                not bool(parsed.query),
+                page.get("word_count", 0) or 0,
+            )
+
+        winner = max(group, key=preference)
+        kept.append(winner)
+        if len(group) > 1:
+            duplicates.append({
+                "canonical_key": key,
+                "kept": winner.get("url"),
+                "duplicates": [p.get("url") for p in group if p is not winner],
+            })
+    return kept, duplicates
 
 
 def band(value: float, stops: list[tuple[float, float]]) -> float:
@@ -108,6 +254,10 @@ def score_page(page: dict, keywords: list[str]) -> dict:
     paras = page.get("para_count", 0)
     lis = page.get("li_count", 0)
     types = set(page.get("jsonld_types", []))
+    kind = page_kind(page)
+    expectation = PAGE_EXPECTATIONS[kind]
+    min_words = expectation["min_words"]
+    target_h2 = expectation["target_h2"]
 
     issues: list[str] = []
     issue_codes: list[str] = []
@@ -144,19 +294,41 @@ def score_page(page: dict, keywords: list[str]) -> dict:
             issue("CANONICAL_MISMATCH", "P1 canonical 指向别的 URL，抓取器会把权重记到别处；确认这是刻意的合并而不是配置错误")
     else:
         issue("NO_CANONICAL", "P2 缺 canonical，重复内容会稀释信号")
-    if wc >= 120:
+    semantic_nodes = len(h1) + len(h2) + paras + lis + (page.get("table_count", 0) or 0)
+    if kind == "functional":
         s += 3
-    elif FUNC_PAGE.search(urlparse(page.get("url") or "").path):
-        issue("LOW_CONTENT_PAGE", "P2 低内容功能页（登录/注册/购物车等），内容少属正常，可考虑补充说明性文案")
+        if wc < 30:
+            issue("LOW_CONTENT_PAGE", "P2 低内容功能页，内容少属正常；只需确认关键状态与说明可访问")
+    elif wc < 10 and semantic_nodes <= 2:
+        issue("SPA_SHELL", "P0 HTML 几乎没有正文或语义节点，疑似 CSR/SPA 空壳；需用 rendered page 与原始响应复核")
+    elif wc < 30 and (len(h2) >= 2 or paras >= 3):
+        s += 1
+        issue(
+            "RENDERING_RISK",
+            "P1 HTML 中存在标题/段落结构，但主正文抽取极少；疑似 streaming SSR、多主内容容器或抽取兼容问题，需复核原始 HTML 与 rendered page",
+        )
+    elif _meaningful_static_content(page):
+        s += 3
+        if min_words and wc < min_words:
+            issue(
+                "THIN_CONTENT",
+                f"P1 正文少于该页面类型的完整性参考值（{kind}: {min_words} 词）；优先补任务所需事实，不按统一长文阈值扩写",
+            )
     else:
-        issue("SPA_SHELL", "P0 静态 HTML 里几乎没有正文（疑似纯前端渲染），AI 抓取器读不到内容")
+        s += 1
+        issue(
+            "THIN_CONTENT",
+            "P1 HTML 有少量可读正文，但信息不足；这是 thin content，不足以据此断言 CSR/SPA 空壳",
+        )
     d["可抓取性"] = s
 
-    # 2. 内容长度 15（1000+ 词是进入高影响力区间的门槛）
-    r = band(wc, [(1500, 1.0), (1000, 0.85), (600, 0.6), (300, 0.35), (120, 0.15)])
+    # 2. 内容长度 15：按页面任务判断完整性，不把描述性长页面均值当统一门槛。
+    if min_words == 0:
+        r = 1.0
+    else:
+        r = band(wc, [(min_words * 1.5, 1.0), (min_words, 0.85),
+                      (min_words * 0.6, 0.6), (min_words * 0.3, 0.35)])
     d["内容长度"] = 15 * r
-    if wc < 1000:
-        issue("SHORT_CONTENT", "P1 正文不足 1000 词门槛（高影响力页面平均 1,943 词，Bottom 四分位仅 170 词）")
 
     # 3. 结构规范 20
     s = 0.0
@@ -164,31 +336,49 @@ def score_page(page: dict, keywords: list[str]) -> dict:
         s += 4
     else:
         issue("BAD_H1", "P1 H1 不是唯一一个（0 个或多个），主题信号混乱")
-    s += 6 * band(len(h2), [(8, 1.0), (6, 0.85), (4, 0.6), (2, 0.3)])
-    if len(h2) < 6:
-        issue("FEW_H2", "P1 H2 小节不足 6 个，高影响力页面平均 10.59 个标题；建议拆到 6-10 节")
+    if target_h2 == 0:
+        s += 6
+    else:
+        h2_ratio = len(h2) / target_h2
+        s += 6 * band(h2_ratio, [(1.0, 1.0), (0.66, 0.75), (0.33, 0.4)])
+        if len(h2) < target_h2:
+            issue("FEW_H2", f"P1 {kind} 页的小节少于任务参考值 {target_h2}；只在有独立子问题时拆 H2")
     s += 5 * band(paras, [(40, 1.0), (25, 0.8), (15, 0.55), (8, 0.3)])
     density = lis / max(paras + lis, 1)
-    s += 5 * band(density, [(0.35, 1.0), (0.2, 0.75), (0.1, 0.45), (0.03, 0.2)])
-    if density < 0.1:
-        issue("LOW_LIST_DENSITY", "P1 列表密度过低，Top 四分位页面为 0.428；把要点改成 ul/ol 更易被抽取")
+    if kind in {"article", "landing", "docs_article"}:
+        s += 5 * band(density, [(0.35, 1.0), (0.2, 0.75), (0.1, 0.45), (0.03, 0.2)])
+        if density < 0.1:
+            issue("LOW_LIST_DENSITY", "P1 该内容页列表密度较低；仅在要点/步骤天然适合列表时调整，不为指标强拆")
+    else:
+        s += 5
     d["结构规范"] = s
 
     # 4. 可抽取块 25（GEO 的核心杠杆）
     has = {
         "定义": bool(RE_DEFINITION.search(text)),
         "数字事实": len(RE_NUMBER.findall(text)) >= 3,
-        "对比": bool(RE_COMPARE.search(text)) or page.get("table_count", 0) >= 1,
-        "操作步骤": bool(RE_HOWTO.search(text)) or (bool(RE_HOWTO_SOFT.search(text)) and lis >= 3),
+        "对比": (bool(RE_COMPARE.search(text)) or page.get("table_count", 0) >= 1
+               or (kind == "pricing" and len(RE_PRICE.findall(text)) >= 2 and lis >= 4)),
+        "操作步骤": (bool(RE_HOWTO.search(text))
+                 or (bool(RE_HOWTO_SOFT.search(text)) and lis >= 3)
+                 or (kind == "docs_article" and len(RE_INSTRUCTION.findall(text)) >= 2)),
         "FAQ": bool(RE_FAQ.search(text)) or "FAQPage" in types,
     }
     block_codes = {"定义": "NO_DEFINITION", "数字事实": "NO_NUMBERS", "对比": "NO_COMPARISON",
                    "操作步骤": "NO_HOWTO", "FAQ": "NO_FAQ"}
     weights = {"定义": 6, "数字事实": 6, "对比": 5, "操作步骤": 5, "FAQ": 3}
-    d["可抽取块"] = sum(w for k, w in weights.items() if has[k])
-    for k, ok in has.items():
-        if not ok:
-            issue(block_codes[k], f"P1 缺「{k}」块，补上可显著提升被吸收概率")
+    required_blocks = required_blocks_for(page, kind)
+    required_weight = sum(weights[k] for k in required_blocks)
+    d["可抽取块"] = (
+        25 * sum(weights[k] for k in required_blocks if has[k]) / required_weight
+        if required_weight else 25
+    )
+    for k in required_blocks:
+        if not has[k]:
+            issue(
+                block_codes[k],
+                f"P1 {kind} 页缺与页面任务相关的「{k}」块；研究只支持相关性观察，不代表格式本身保证引用增益",
+            )
 
     # 4b. 段落级可引：检索按段落选材，页面长 ≠ 有可引之材
     segs = split_sections(text, h2)
@@ -207,13 +397,16 @@ def score_page(page: dict, keywords: list[str]) -> dict:
     if RE_AUTHOR.search(text):
         s += 2
     ext = page.get("external_links", 0)
-    s += 4 * band(ext, [(6, 1.0), (3, 0.7), (1, 0.4)])
-    if ext < 3:
-        issue("FEW_EXTERNAL_LINKS", "P2 几乎不引用外部来源，证据链偏弱")
+    if kind in {"article", "landing"}:
+        s += 4 * band(ext, [(6, 1.0), (3, 0.7), (1, 0.4)])
+        if ext < 3:
+            issue("FEW_EXTERNAL_LINKS", "P2 证据型内容引用的外部来源较少；只为可核实 claims 补一手来源，不机械凑链接")
+    else:
+        s += 4
     hit_schema = types & AUTHORITY_SCHEMA
     s += 5 * band(len(hit_schema), [(3, 1.0), (2, 0.75), (1, 0.45)])
     if not hit_schema:
-        issue("NO_JSONLD", "P0 没有任何结构化数据（JSON-LD），机器读不懂这页在讲什么实体")
+        issue("NO_JSONLD", "P2 未提供适合该页的 JSON-LD 显式线索；结构化数据可帮助消歧，但不是抓取或 AI 排名门票")
     # schema 与可见内容一致性：声明了 FAQPage 但正文没有可见问答 = 自我声明，
     # 检索系统会拿可见文本对账，对不上时结构化数据反而变成负信号
     if "FAQPage" in types and not RE_FAQ.search(text):
@@ -229,20 +422,25 @@ def score_page(page: dict, keywords: list[str]) -> dict:
     surface = " ".join([page.get("title", "")] + h1 + h2).lower()
     hits = [k for k in keywords if k and k.lower() in surface]
     cover = len(hits) / max(len(keywords), 1) if keywords else 0
-    d["对题性"] = 10 * band(cover, [(0.4, 1.0), (0.25, 0.8), (0.12, 0.55), (0.04, 0.3)])
-    if cover < 0.12:
-        issue("LOW_RELEVANCE", "P1 标题体系几乎不含目标问题关键词，对题性是影响力最强的预测因子（r=0.432）")
+    if kind in {"article", "landing"}:
+        d["对题性"] = 10 * band(cover, [(0.4, 1.0), (0.25, 0.8), (0.12, 0.55), (0.04, 0.3)])
+        if cover < 0.12:
+            issue("LOW_RELEVANCE", "P2 标题与当前合成问题库的词面覆盖较低；先用真实 query/demand 验证，再决定是否改标题")
+    else:
+        d["对题性"] = 10
 
     total = round(sum(d.values()), 1)
     return {
         "url": page.get("url"),
         "title": page.get("title", "")[:120],
         "word_count": wc,
+        "page_kind": kind,
         "score": total,
         "grade": "A" if total >= 80 else "B" if total >= 65 else "C" if total >= 45 else "D",
         "dimensions": {k: round(v, 1) for k, v in d.items()},
         "sections_total": len(segs), "sections_quotable": q_n,
         "blocks": has,
+        "required_blocks": sorted(required_blocks),
         "jsonld_types": sorted(types),
         "issues": issues,
         "issue_codes": issue_codes,
@@ -270,7 +468,8 @@ def keywords_from_config(cfg: dict) -> list[str]:
 def run(slug: str) -> dict:
     cfg = G.load_config(slug)
     pdir = G.project_dir(slug)
-    pages = G.read_jsonl(pdir / "evidence" / "pages.jsonl")
+    raw_pages = G.read_jsonl(pdir / "evidence" / "pages.jsonl")
+    pages, canonical_duplicates = dedupe_pages_by_canonical(raw_pages)
     if not pages and not G.has_site(cfg):
         G.info("无自有网站项目：跳过站点体检（技术层不适用；内容与阵地诊断照常）")
         out = {"slug": slug, "audited_at": G.now_iso(), "market": cfg.get("market", "cn"),
@@ -295,7 +494,7 @@ def run(slug: str) -> dict:
     market = cfg.get("market", "cn")
     lang_dist: dict[str, int] = {}
     for p in pages:
-        if p.get("word_count", 0) >= 120:
+        if page_kind(p) != "functional" and _meaningful_static_content(p):
             # 有正文就从正文重算语言，不盲信存储字段——evidence 可能是旧版口径抓的
             if p.get("text"):
                 lang = G.page_language(p["text"], p.get("lang", ""))
@@ -307,8 +506,11 @@ def run(slug: str) -> dict:
     zh_pages = lang_dist.get("zh", 0)
     ja_pages = lang_dist.get("ja", 0)
     content_pages = sum(lang_dist.values())
-    hreflang_pages = sum(1 for p in pages
-                         if p.get("word_count", 0) >= 120 and p.get("hreflang_count", 0) > 0)
+    hreflang_pages = sum(
+        1 for p in pages
+        if page_kind(p) != "functional" and _meaningful_static_content(p)
+        and p.get("hreflang_count", 0) > 0
+    )
     # 多语言站才要求 hreflang：单语言站声明它没有意义
     multilingual = sum(1 for v in (zh_pages, en_pages, ja_pages) if v > 0) >= 2
 
@@ -327,13 +529,28 @@ def run(slug: str) -> dict:
         thin = "英文" if en_pages < zh_pages else "中文"
         lang_warn = True
         site_issues.append(f"P1 中英内容严重不对等（中文 {zh_pages} 页 / 英文 {en_pages} 页），{thin}侧是明显短板")
-    if site.get("ai_bots_blocked"):
-        site_issues.append("P0 robots.txt 封禁了 " + "、".join(site["ai_bots_blocked"]) + "，这些引擎永远抓不到你")
-    if site.get("ai_ua_blocked"):
+    blocked_by_role = blocked_bots_by_role(site)
+    if blocked_by_role["search"]:
         site_issues.append(
-            "P0 WAF/CDN 差异封锁：普通浏览器能打开，但换 " + "、".join(site["ai_ua_blocked"])
-            + " 的 UA 抓首页被拒（robots 明明放行）。在引擎侧等于不存在，且站长自己看不出来——"
-            "到 CDN/防火墙里给这些 UA 加白名单")
+            "P0 robots.txt 封禁搜索 crawler：" + "、".join(blocked_by_role["search"])
+            + "；对应搜索/AI Search 的发现与刷新会受阻"
+        )
+    if blocked_by_role["user"]:
+        site_issues.append(
+            "P1 robots.txt 封禁用户触发 crawler：" + "、".join(blocked_by_role["user"])
+            + "；需结合各厂商对 user fetch 的 robots 规则复核"
+        )
+    if blocked_by_role["training"]:
+        site_issues.append(
+            "P2 robots.txt 拒绝训练/扩展用途 crawler：" + "、".join(blocked_by_role["training"])
+            + "；这是内容使用策略，不等同于 AI Search 不可见"
+        )
+    ua_denied = site.get("ai_ua_probe_denied") or site.get("ai_ua_blocked") or []
+    if ua_denied:
+        site_issues.append(
+            "P1 未验证的 WAF/UA 差异信号：GeoLook 当前来源换成 " + "、".join(ua_denied)
+            + " UA 后被拒；UA 可伪装，这不能证明真实 crawler 被封。先用官方 IP + UA 或 CDN 日志核验，确证后再精确放行"
+        )
     for p in site.get("ai_bots_partial", []) or []:
         site_issues.append(
             f"P1 robots.txt 对 {p['bot']} 封了部分内容路径（{p['count']}/{p['sampled']} 抽样页命中 "
@@ -392,14 +609,18 @@ def run(slug: str) -> dict:
             "一边给索引一边拦抓取，互相矛盾")
     grade_dist = {g: sum(1 for r in results if r["grade"] == g) for g in "ABCD"}
 
-    # 全站最常见的缺口 → 直接就是 P0 内容工程清单
+    # 只统计该页面类型真正需要的块；不再把 FAQ/数字/步骤机械要求到每一页。
     gap = {}
     for r in results:
-        for k, v in r["blocks"].items():
-            gap.setdefault(k, 0)
-            gap[k] += 0 if v else 1
-    block_gap = sorted(gap.items(), key=lambda x: -x[1])
-    block_gap_dicts = [{"block": k, "missing_pages": v, "total": len(results)} for k, v in block_gap]
+        for k in r.get("required_blocks", []):
+            stats = gap.setdefault(k, {"missing": 0, "total": 0})
+            stats["total"] += 1
+            stats["missing"] += 0 if r["blocks"].get(k) else 1
+    block_gap = sorted(gap.items(), key=lambda x: -x[1]["missing"])
+    block_gap_dicts = [
+        {"block": k, "missing_pages": v["missing"], "total": v["total"]}
+        for k, v in block_gap if v["missing"] > 0
+    ]
 
     # —— 四层模型：访问 → 定向 → 理解 → 可引用 ——
     # 每层依赖上一层：访问失败时下游的一切优化在引擎侧不可见，修复顺序必须从上游开始。
@@ -416,18 +637,26 @@ def run(slug: str) -> dict:
         return {"key": key, "name": name, "question": question, "status": status,
                 "issues": [t for _, t in entries]}
 
-    spa, unreach = pages_with("SPA_SHELL"), pages_with("PAGE_UNREACHABLE")
+    spa, render_risk = pages_with("SPA_SHELL"), pages_with("RENDERING_RISK")
+    unreach = pages_with("PAGE_UNREACHABLE")
     noidx = pages_with("NOINDEX") + pages_with("XROBOTS_NOINDEX")
     nojld = pages_with("NO_JSONLD")
     layers = [
         layer("access", "访问", "抓取器能拿到内容吗", [
-            ("fail", "robots.txt 整站封禁 " + "、".join(site["ai_bots_blocked"]))
-            if site.get("ai_bots_blocked") else None,
-            ("fail", "WAF/CDN 对 " + "、".join(site["ai_ua_blocked"]) + " 的 UA 拒绝访问（robots 明明放行）")
-            if site.get("ai_ua_blocked") else None,
+            ("fail", "robots.txt 封禁搜索 crawler：" + "、".join(blocked_by_role["search"]))
+            if blocked_by_role["search"] else None,
+            ("warn", "robots.txt 封禁用户触发 crawler：" + "、".join(blocked_by_role["user"]))
+            if blocked_by_role["user"] else None,
+            ("warn", "训练 crawler 被拒（内容使用策略，不是 Search blocker）："
+             + "、".join(blocked_by_role["training"]))
+            if blocked_by_role["training"] else None,
+            ("warn", "UA 差异探测被拒但来源 IP 未验证：" + "、".join(ua_denied))
+            if ua_denied else None,
             ("warn", f"robots 封了部分内容路径（{len(site['ai_bots_partial'])} 个爬虫受影响）")
             if site.get("ai_bots_partial") else None,
             (("fail" if spa >= n * 0.3 else "warn"), f"{spa} 页疑似前端渲染空壳，抓取器读不到正文") if spa else None,
+            ("warn", f"{render_risk} 页存在 streaming/正文抽取兼容风险，需 rendered page 复核")
+            if render_risk else None,
             (("fail" if noidx >= n * 0.3 else "warn"), f"{noidx} 页带 noindex（meta 或 X-Robots-Tag）") if noidx else None,
             ("warn", f"{unreach} 页抓取失败") if unreach else None,
         ]),
@@ -449,7 +678,7 @@ def run(slug: str) -> dict:
             ("warn", f"{len(dup_bodies)} 组近重复正文的页面") if dup_bodies else None,
         ]),
         layer("understand", "理解", "机器读得懂这是什么实体吗", [
-            (("fail" if nojld >= n * 0.5 else "warn"), f"{nojld} 页没有任何 JSON-LD") if nojld else None,
+            ("warn", f"{nojld} 页没有适合该页的 JSON-LD 显式线索（非抓取门票）") if nojld else None,
             ("warn", f"{pages_with('SCHEMA_CONTENT_MISMATCH')} 页 schema 与可见内容不一致")
             if pages_with("SCHEMA_CONTENT_MISMATCH") else None,
             ("fail", "目标市场缺原生语言内容") if lang_fail
@@ -472,6 +701,7 @@ def run(slug: str) -> dict:
 
     out = {
         "slug": slug,
+        "scoring_version": "page-kind-v2",
         "audited_at": G.now_iso(),
         "market": market,
         "site": site,
@@ -482,7 +712,9 @@ def run(slug: str) -> dict:
         "site_issues": site_issues,
         "layers": layers,
         "keywords_used": kws,
+        "raw_page_count": len(raw_pages),
         "page_count": len(results),
+        "canonical_duplicates": canonical_duplicates,
         "avg_score": avg,
         "grade_distribution": grade_dist,
         "block_gap": block_gap_dicts,

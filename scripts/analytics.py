@@ -20,6 +20,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import geolib as G
+import sample as S
 
 WEIGHTS = {"mention": 30, "cite": 25, "channel": 20, "content": 15, "fact": 10}
 
@@ -42,14 +43,24 @@ def _rows(path: Path):
     return [r for r in G.read_jsonl(path) if r.get("ok")]
 
 
-def _unprompted(rows):
-    return [r for r in rows if not r.get("brand_in_question")]
+def _unprompted(rows, cfg=None):
+    if cfg is None:
+        return [r for r in rows if not r.get("brand_in_question")]
+    return [
+        r for r in rows
+        if not (S.brand_in_question(r.get("question", ""), cfg)
+                if r.get("question") else bool(r.get("brand_in_question")))
+    ]
 
 
 def _cite_share(rows, own) -> tuple[float | None, int, int]:
     """own 域名条数 / 全部引用域名条数。没有任何引用时返回 None。"""
     total = mine = 0
+    # citation 只有联网/可返回来源的终端才有可解释分母；闭卷 API 的 0 条引用是未测，
+    # 不是 0% citation performance。
     for r in rows:
+        if r.get("search_enabled") is not True:
+            continue
         for d in (r.get("analysis") or {}).get("cited_domains") or []:
             total += 1
             if _is_own(d, own):
@@ -73,11 +84,12 @@ def _median(vals):
 def health(slug: str, bp: dict | None, factcheck: list, rows_latest) -> dict:
     cfg = G.load_config(slug)
     own = _own_host(cfg)
-    up = _unprompted(rows_latest)
+    up = _unprompted(rows_latest, cfg)
+    web_up = [r for r in up if r.get("search_enabled") is True]
     # 无自有网站时「引用官网率」无从谈起——记 None（不适用），
     # 由权重重整摊到其余维度，绝不退化成 0 假装"一次都没被引用"
     subs: dict[str, float | None] = {
-        "mention": _mention(up),
+        "mention": _mention(web_up),
         "cite": _cite_share(up, own)[0] if G.has_site(cfg) else None,
         "channel": None, "content": None, "fact": None,
     }
@@ -90,8 +102,14 @@ def health(slug: str, bp: dict | None, factcheck: list, rows_latest) -> dict:
     if checked:
         subs["fact"] = sum(1 for f in checked if f["state"] == "一致") / len(checked)
 
+    # 健康分是 outcome + readiness 的组合。若联网提及/引用两项都没测到，
+    # 只拿内容/阵地凑一个数字会被误读成 GEO 成效分，因此保持未测。
+    visibility_measured = subs["mention"] is not None or subs["cite"] is not None
     wsum = sum(WEIGHTS[k] for k, v in subs.items() if v is not None)
-    score = (sum(WEIGHTS[k] * v for k, v in subs.items() if v is not None) / wsum * 100) if wsum else None
+    score = (
+        sum(WEIGHTS[k] * v for k, v in subs.items() if v is not None) / wsum * 100
+        if wsum and visibility_measured else None
+    )
     return {"score": round(score, 1) if score is not None else None,
             "subs": {k: (round(v, 3) if v is not None else None) for k, v in subs.items()},
             "weights": WEIGHTS,
@@ -100,10 +118,20 @@ def health(slug: str, bp: dict | None, factcheck: list, rows_latest) -> dict:
 
 # ---------------------------------------------------------------- 各引擎
 
-def _verdict(m, own_cited, peers) -> str:
-    """peers：本期同市场其他平台的提及率。「最好」只在可比较且严格领先时说。"""
+def _verdict(m, own_cited, peers, searched: bool) -> str:
+    """peers：本期同市场同口径平台的提及率。
+
+    闭卷 API 的提及率只代表参数化知识快照，不得把没有 citations 写成
+    「从未引用官网」，也不得外推为联网 Search 表现。
+    """
     if m is None:
         return "本期无样本"
+    if not searched:
+        return (
+            "闭卷 API 未检出品牌；仅为参数化知识快照，不代表联网 Search 可见性"
+            if m == 0
+            else "闭卷 API 知识快照，不代表联网 Search 可见性或平台优先级"
+        )
     if m == 0:
         return "完全不可见——先看该引擎偏好的阵地缺什么"
     vals = [m] + [p for p in peers if p is not None]
@@ -142,10 +170,10 @@ def engines(slug: str, rows_latest, metrics: dict | None) -> list[dict]:
     for r in rows_latest:
         by.setdefault(r["platform"], []).append(r)
     mkt = {p: rs[0].get("market", "cn") for p, rs in by.items()}
-    ment = {p: _mention(_unprompted(rs)) for p, rs in by.items()}
+    ment = {p: _mention(_unprompted(rs, cfg)) for p, rs in by.items()}
     out = []
     for plat, rs in by.items():
-        up = _unprompted(rs)
+        up = _unprompted(rs, cfg)
         m = ment[plat]
         ranks = [r["analysis"]["brand_rank"] for r in up
                  if r["analysis"]["brand_mentioned"] and r["analysis"]["brand_rank"]]
@@ -184,7 +212,8 @@ def engines(slug: str, rows_latest, metrics: dict | None) -> list[dict]:
             "brand_dist": _brand_dist(up)[:8],
             "verdict": _verdict(m,
                                 any(r["analysis"].get("own_domain_cited") for r in rs),
-                                [ment[p] for p in by if p != plat and mkt[p] == mkt[plat]]),
+                                [ment[p] for p in by if p != plat and mkt[p] == mkt[plat]],
+                                any(r.get("search_enabled") is True for r in rs)),
             "example": example,
         })
     out.sort(key=lambda x: -(x["mention"] or 0))
@@ -196,7 +225,7 @@ def engines(slug: str, rows_latest, metrics: dict | None) -> list[dict]:
 def competitors(slug: str, rows_latest) -> dict:
     cfg = G.load_config(slug)
     comps = cfg.get("competitors", [])
-    up = _unprompted(rows_latest)
+    up = _unprompted(rows_latest, cfg)
     bym = {"cn": [r for r in up if r.get("market", "cn") == "cn"],
            "global": [r for r in up if r.get("market") == "global"]}
 
@@ -362,14 +391,8 @@ def questions(slug: str, rows_latest, bp: dict | None) -> list[dict]:
     byq: dict[str, list] = {}
     for r in rows_latest:
         byq.setdefault(r.get("question_id"), []).append(r)
-    brand = cfg.get("brand", {})
-    names = [brand.get("name", "")] + list(brand.get("aliases") or [])
-
     def is_probe(q, rs) -> bool:
-        if any(r.get("brand_in_question") for r in rs):
-            return True
-        text = (q.get("text") or "").lower()
-        return any(n and n.lower() in text for n in names)
+        return S.brand_in_question(q.get("text", ""), cfg)
 
     out = []
     for q in cfg.get("questions", []):
@@ -413,7 +436,7 @@ def trend(slug: str) -> list[dict]:
         if not rows:
             continue
         h = health(slug, bp, fc, rows)   # 阵地/内容用当前值近似——历史蓝图未存档
-        up = _unprompted(rows)
+        up = _unprompted(rows, cfg)
         mention = _mention(up)
         share = _cite_share(up, own)[0]
         pts.append({"date": f.stem, "health": h["score"],
@@ -430,7 +453,7 @@ def question_delta(slug: str) -> list[dict]:
         return []
     def per_q(path):
         out = {}
-        for r in _unprompted(_rows(path)):
+        for r in _unprompted(_rows(path), G.load_config(slug)):
             out.setdefault(r.get("question_id"), []).append(r)
         return {k: _mention(v) for k, v in out.items() if k}
     before, after = per_q(files[-2]), per_q(files[-1])
@@ -468,7 +491,7 @@ def build(slug: str) -> dict:
         "health": health(slug, bp, fc, rows_latest),
         "engines": engines(slug, rows_latest, metrics),
         "question_groups": question_groups(qs),
-        "brand_dist": {m: _brand_dist([r for r in _unprompted(rows_latest)
+        "brand_dist": {m: _brand_dist([r for r in _unprompted(rows_latest, G.load_config(slug))
                                        if r.get("market", "cn") == m])
                        for m in ("cn", "global")},
         "competitors": competitors(slug, rows_latest),

@@ -14,7 +14,7 @@ from pathlib import Path
 
 import geolib as G
 
-GRADE_NOTE = {"A": "可直接被引用", "B": "基本可用", "C": "需要改造", "D": "等于不存在"}
+GRADE_NOTE = {"A": "启发式检查较完整", "B": "基本完整", "C": "有明显缺口", "D": "缺口较多，需人工复核"}
 
 
 def cell(s) -> str:
@@ -28,8 +28,9 @@ def prev_metrics(pdir: Path, current: str):
     return G.read_json(files[-1], None) if files else None
 
 
-def prev_audit(pdir: Path):
+def prev_audit(pdir: Path, current: str):
     hist = sorted((pdir / "history").glob("audit-*.json"))
+    hist = [f for f in hist if f.stem != f"audit-{current}"]
     return G.read_json(hist[-1], None) if hist else None
 
 
@@ -108,19 +109,37 @@ def build_markdown(cfg, audit, metrics, prev_m, prev_a, todos) -> str:
     A("")
     A(f"- 官网：{b['site']}")
     A(f"- 市场：{ {'cn':'国内','global':'海外','both':'国内+海外'}.get(cfg.get('market','cn'), cfg.get('market')) }")
-    A(f"- 本期抓取：{audit['page_count']} 页；站点均分 **{audit['avg_score']}**"
-      + (delta(audit["avg_score"], prev_a["avg_score"]) if prev_a else " （首期基线）"))
+    current_scoring = audit.get("scoring_version")
+    previous_scoring = prev_a.get("scoring_version") if prev_a else None
+    comparable_audit = bool(prev_a and current_scoring == previous_scoring)
+    audit_suffix = (
+        delta(audit["avg_score"], prev_a["avg_score"])
+        if comparable_audit
+        else (" （新评分口径基线）" if prev_a else " （首期基线）")
+    )
+    raw_pages = audit.get("raw_page_count", audit["page_count"])
+    page_scope = (
+        f"原始抓取：{raw_pages} 页；canonical 去重后审计：{audit['page_count']} 页"
+        if raw_pages != audit["page_count"]
+        else f"本期审计：{audit['page_count']} 页"
+    )
+    A(f"- {page_scope}；站点均分 **{audit['avg_score']}**" + audit_suffix)
     A("")
 
     A("## 一、结论先行")
     A("")
     p0 = [t for t in todos if t["priority"] == "P0"]
+    has_web_metrics = bool(metrics and any(
+        m.get("search_enabled") for m in metrics.get("platforms", {}).values()
+    ))
     if p0:
         A("本期必须先解决的 P0：")
         for t in p0[:5]:
             A(f"- **{t['action']}** — 影响 {t['affected']} 处")
     else:
-        A("- 没有 P0 阻塞项，重心转向内容抽取块和外部信源建设。")
+        A("- 站点没有 P0 技术阻塞项。")
+    if metrics and not has_web_metrics:
+        A("- 测量层 P0：补真实联网端 baseline；当前闭卷 API 不能回答 AI Search 引用表现。")
     A("")
     if metrics and metrics.get("platforms"):
         for mk, mk_name in (("cn", "国内"), ("global", "海外")):
@@ -131,6 +150,9 @@ def build_markdown(cfg, audit, metrics, prev_m, prev_a, todos) -> str:
             rows = [(p, m) for p, m in pool if m.get("mention_rate") is not None]
             if not rows:
                 A(f"- {mk_name}：未测")
+                continue
+            if not any(m.get("search_enabled") for _, m in rows):
+                A(f"- {mk_name}：本期只有闭卷 API 快照，可描述模型记忆中的提及，不能据此判断 AI Search 引用或平台优先级")
                 continue
             best = max(rows, key=lambda x: x[1]["mention_rate"])
             worst = min(rows, key=lambda x: x[1]["mention_rate"])
@@ -148,11 +170,16 @@ def build_markdown(cfg, audit, metrics, prev_m, prev_a, todos) -> str:
     A("|---|---|")
     A(f"| sitemap.xml | {'有（' + str(s.get('sitemap_url_count', 0)) + ' 条 URL）' if s.get('has_sitemap') else '**无**'} |")
     A(f"| llms.txt | {'有' if s.get('has_llms_txt') else '**无**'} |")
-    A(f"| robots 封禁 AI 抓取器 | {'、'.join(s.get('ai_bots_blocked') or []) or '无'} |")
+    by_role = s.get("ai_bots_blocked_by_role") or {}
+    if by_role:
+        A(f"| robots 封禁搜索 crawler | {'、'.join(by_role.get('search') or []) or '无'} |")
+        A(f"| robots 拒绝训练 crawler | {'、'.join(by_role.get('training') or []) or '无（内容使用策略项）'} |")
+    else:
+        A(f"| robots 封禁 AI 抓取器（旧口径） | {'、'.join(s.get('ai_bots_blocked') or []) or '无'} |")
     probe = s.get("ai_ua_probe") or {}
-    if probe or s.get("ai_ua_blocked"):
-        bad = s.get("ai_ua_blocked") or []
-        A(f"| WAF/UA 差异探测 | {'**拒绝 ' + '、'.join(bad) + '**' if bad else f'实测放行 {len(probe)} 个 AI 爬虫 UA'} |")
+    denied = s.get("ai_ua_probe_denied") or s.get("ai_ua_blocked") or []
+    if probe or denied:
+        A(f"| WAF/UA 初筛（来源 IP 未验证） | {'待核验：' + '、'.join(denied) + ' UA 被拒' if denied else f'当前来源探测 {len(probe)} 个 UA 未被拒'} |")
     A(f"| 页面可访问率 | {s.get('pages_ok', 0)}/{s.get('pages_crawled', 0)} |")
     lc = audit.get("language_coverage") or {}
     if lc:
@@ -179,17 +206,17 @@ def build_markdown(cfg, audit, metrics, prev_m, prev_a, todos) -> str:
     A("| 分数 | 词数 | 缺失抽取块 | 页面 |")
     A("|---:|---:|---|---|")
     for p in audit["pages"][:12]:
-        miss = "、".join([k for k, v in p["blocks"].items() if not v]) or "—"
+        miss = "、".join([k for k in p.get("required_blocks", []) if not p["blocks"].get(k)]) or "—"
         label = cell(p["title"] or p["url"])[:40]
         A(f"| {p['score']} | {p['word_count']} | {miss} | [{label}]({p['url']}) |")
     A("")
-    A("全站抽取块缺口（GEO 最大的杠杆点）：")
+    A("按页面任务统计的抽取块缺口：")
     A("")
-    A("| 抽取块 | 缺失页数 | 实测增益 |")
+    A("| 抽取块 | 缺失页数 | 研究证据 |")
     A("|---|---:|---|")
     gain = {"数字事实": "+61.6%", "定义": "+57.3%", "对比": "+55.3%", "操作步骤": "+41.2%", "FAQ": "无显著增益，但利于问答召回"}
     for g in audit["block_gap"]:
-        A(f"| {g['block']} | {g['missing_pages']}/{g['total']} | {gain.get(g['block'], '—')} |")
+        A(f"| {g['block']} | {g['missing_pages']}/{g['total']} | 观察相关 {gain.get(g['block'], '—')}，非本站因果保证 |")
     A("")
 
     A("## 四、AI 答案可见性")
@@ -214,11 +241,11 @@ def build_markdown(cfg, audit, metrics, prev_m, prev_a, todos) -> str:
             A("")
             A("**无提示可见性**（问题里不出现品牌名，考的是 AI 会不会主动想到你）：")
             A("")
-            A("| 平台 | 样本 | 提及率 | 首位率 | Top3 | 均排名 | 引用官网率 |")
-            A("|---|---:|---:|---:|---:|---:|---:|")
+            A("| 平台 | 提及样本 | 联网引用样本 | 提及率 | 首位率 | Top3 | 均排名 | 引用官网率 |")
+            A("|---|---:|---:|---:|---:|---:|---:|---:|")
             for plat, m in rows.items():
                 pm = (prev_m or {}).get("platforms", {}).get(plat, {})
-                A(f"| {cell(m.get('label', plat))} | {m['samples']} "
+                A(f"| {cell(m.get('label', plat))} | {m['samples']} | {m.get('citation_samples', 0)} "
                   f"| {pct(m.get('mention_rate'))}{delta(m.get('mention_rate'), pm.get('mention_rate'), True)} "
                   f"| {pct(m.get('top1_rate'))} | {pct(m.get('top3_rate'))} "
                   f"| {m['avg_rank'] or '—'} | {pct(m.get('own_domain_cite_rate'))} |")
@@ -231,7 +258,7 @@ def build_markdown(cfg, audit, metrics, prev_m, prev_a, todos) -> str:
                 A("|---|---:|---:|---:|")
                 for plat, pr in probes.items():
                     A(f"| {cell(rows[plat].get('label', plat))} | {pr['samples']} "
-                      f"| {pr['recognized_rate']:.0%} | {pr['own_domain_cite_rate']:.0%} |")
+                      f"| {pct(pr.get('recognized_rate'))} | {pct(pr.get('own_domain_cite_rate'))} |")
                 A("")
                 A("> 这两张表必须分开看。点名提问时答案必然复述品牌名，混进提及率就是假阳性。")
                 A("")
@@ -279,8 +306,11 @@ def market_avg_cards(metrics) -> list[tuple[str, str]]:
         pool = [m for m in metrics["platforms"].values() if m.get("market", "cn") == mk]
         if not pool:
             continue
-        rates = [m["mention_rate"] for m in pool if m.get("mention_rate") is not None]
-        cards.append((f"{mk_name}平均提及率",
+        searched = [m for m in pool if m.get("search_enabled")]
+        measured = searched or pool
+        rates = [m["mention_rate"] for m in measured if m.get("mention_rate") is not None]
+        scope = "联网端" if searched else "闭卷API"
+        cards.append((f"{mk_name}{scope}平均提及率",
                       f"{sum(rates)/len(rates):.0%}" if rates else "未测"))
     return cards
 
@@ -382,7 +412,7 @@ def run(slug: str) -> Path:
         files = sorted((pdir / "metrics").glob("*.json")) if (pdir / "metrics").exists() else []
         metrics = G.read_json(files[-1], None) if files else None
     pm = prev_metrics(pdir, metrics["date"] if metrics else G.today())
-    pa = prev_audit(pdir)
+    pa = prev_audit(pdir, G.today())
 
     todos = collect_todos(audit)
     md = build_markdown(cfg, audit, metrics, pm, pa, todos)
@@ -405,7 +435,8 @@ def run(slug: str) -> Path:
     # 归档本期 audit，供下期算 delta
     G.write_json(pdir / "history" / f"audit-{G.today()}.json",
                  {"avg_score": audit["avg_score"], "grade_distribution": audit["grade_distribution"],
-                  "page_count": audit["page_count"], "date": G.today()})
+                  "page_count": audit["page_count"], "date": G.today(),
+                  "scoring_version": audit.get("scoring_version")})
 
     G.info(f"报告已生成 → {outdir/'report.html'}")
     return outdir / "report.html"

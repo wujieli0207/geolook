@@ -77,22 +77,38 @@ def from_audit(audit: dict, cfg: dict, seq) -> list[dict]:
     weak = [p["url"] for p in pages if p["score"] < 65]
 
     # —— 站点级 ——
-    if site.get("ai_bots_blocked"):
+    blocked_by_role = site.get("ai_bots_blocked_by_role") or {}
+    if not blocked_by_role:
+        roles = {
+            "Googlebot": "search", "bingbot": "search", "OAI-SearchBot": "search",
+            "Claude-SearchBot": "search", "PerplexityBot": "search", "Baiduspider": "search",
+            "Sogou web spider": "search", "YisouSpider": "search",
+            "ChatGPT-User": "user", "Claude-User": "user", "Perplexity-User": "user",
+            "GPTBot": "training", "ClaudeBot": "training", "Google-Extended": "training",
+            "Bytespider": "training",
+        }
+        blocked_by_role = {
+            role: [b for b in (site.get("ai_bots_blocked") or []) if roles.get(b) == role]
+            for role in ("search", "user", "training")
+        }
+    search_blocked = blocked_by_role.get("search") or []
+    if search_blocked:
         out.append(_t(next(seq), "P0", "页面技术",
-                      "解除 robots.txt 对 AI 抓取器的封禁",
-                      f"robots 封禁 {'、'.join(site['ai_bots_blocked'])}，这些引擎永远抓不到你（method.md 可抓取性）",
+                      "解除 robots.txt 对搜索 crawler 的误封",
+                      f"robots 封禁 {'、'.join(search_blocked)}，会阻碍对应搜索/AI Search 的发现与刷新",
                       "移除对应 Disallow，或改为仅屏蔽后台路径", "开发", "S",
                       {"type": "auto", "check": "site.no_ai_bot_block",
-                       "desc": "重抓后 robots 不再整站封禁任何 AI 抓取器"}))
-    if site.get("ai_ua_blocked"):
-        out.append(_t(next(seq), "P0", "页面技术",
-                      "解除 WAF/CDN 对 AI 爬虫的差异封锁",
-                      f"普通浏览器 200，但换 {'、'.join(site['ai_ua_blocked'])} 的 UA 抓首页被拒——"
-                      "robots 放行没用，引擎侧等于不存在，且站长在浏览器里看不出来",
-                      "到 CDN/防火墙（Cloudflare Bot Fight、阿里云 WAF 等）给这些爬虫 UA 加白名单，"
-                      "不要用「拦所有 bot」的一刀切规则", "开发", "S",
-                      {"type": "auto", "check": "site.no_ai_ua_block",
-                       "desc": "重抓时用 AI 爬虫 UA 探测首页不再被拒"}))
+                       "desc": "重抓后 robots 不再整站封禁搜索 crawler"}))
+    ua_denied = site.get("ai_ua_probe_denied") or site.get("ai_ua_blocked") or []
+    if ua_denied:
+        out.append(_t(next(seq), "P1", "页面技术",
+                      "核验 WAF/CDN 是否真的阻挡官方 AI crawler",
+                      f"GeoLook 当前来源换成 {'、'.join(ua_denied)} UA 后被拒；UA 可伪装，"
+                      "这只是待核验信号，不足以证明真实 crawler 被封",
+                      "查 CDN/WAF 日志，或以厂商官方 IP + UA 双重验证；只有确证后才精确放行，"
+                      "不要按 UA 全局白名单", "开发", "S",
+                      {"type": "manual",
+                       "desc": "用官方 IP + UA 或 CDN 日志确认真实 crawler 的访问结果"}))
     for p in site.get("ai_bots_partial", []) or []:
         out.append(_t(next(seq), "P1", "页面技术",
                       f"核对 robots 对 {p['bot']} 的部分路径封禁",
@@ -182,6 +198,17 @@ def from_audit(audit: dict, cfg: dict, seq) -> list[dict]:
         t["baseline_count"] = len(spa)
         out.append(t)
 
+    rendering = [p["url"] for p in pages if _has_issue(p, "RENDERING_RISK", "抽取兼容问题")]
+    if rendering:
+        t = _t(next(seq), "P1", "页面技术", "复核并修正正文渲染/抽取兼容性",
+               "HTML 中能看到标题/段落结构，但主正文抽取极少；常见于 streaming SSR、多 article 容器或 skeleton 优先",
+               "对比原始 HTML、无 JS 抽取与 rendered page；让主内容在初始响应里可稳定定位，"
+               "不直接按纯 CSR 重构", "开发", "S",
+               {"type": "manual", "desc": "原始 HTML 与 rendered page 均能稳定读到核心正文"},
+               affected=rendering)
+        t["baseline_count"] = len(rendering)
+        out.append(t)
+
     noidx = [p["url"] for p in pages
              if _has_issue(p, "NOINDEX", "noindex") or _has_issue(p, "XROBOTS_NOINDEX", "X-Robots-Tag")]
     if noidx:
@@ -196,27 +223,34 @@ def from_audit(audit: dict, cfg: dict, seq) -> list[dict]:
         t["baseline_count"] = len(noidx)
         out.append(t)
 
-    no_schema = [p["url"] for p in pages if not p.get("jsonld_types")]
+    schema_kinds = {"landing", "about", "pricing", "article", "docs_article"}
+    no_schema = [p["url"] for p in pages
+                 if not p.get("jsonld_types") and p.get("page_kind", "landing") in schema_kinds]
     if no_schema:
-        t = _t(next(seq), "P0", "页面技术", "全站补 JSON-LD 结构化数据",
-               "无结构化数据，机器读不懂这页在讲什么实体（method.md 权威信号）",
-               "用 `geo.py generate --asset jsonld` 产出补丁，按页面类型挂 "
-               "Organization / SoftwareApplication / Article / FAQPage / BreadcrumbList",
+        t = _t(next(seq), "P2", "页面技术", "给适合的核心页补准确 JSON-LD",
+               "结构化数据可提供实体消歧线索，但不是抓取或 AI 排名门票；只应添加与可见正文一致的类型",
+               "按页面真实用途选择 Organization / SoftwareApplication / Article / BreadcrumbList；"
+               "不要给每页硬塞 schema，也不要声明页面没有的事实",
                "开发", "M", {"type": "auto", "check": "pages.has_jsonld",
                              "desc": "受影响页面重抓后含 JSON-LD"},
                affected=no_schema)
         t["baseline_count"] = len(no_schema)
         out.append(t)
 
-    # 抽取块缺口 → 每种一条，附实测增益
+    # 抽取块缺口 → 每种一条，附研究观察值与因果边界
     gain = {"数字事实": "+61.6%", "定义": "+57.3%", "对比": "+55.3%", "操作步骤": "+41.2%",
             "FAQ": "利于问答召回（格式本身无增益）"}
     for g in audit.get("block_gap", []):
         if g["missing_pages"] >= max(3, g["total"] * 0.3):
             blk = g["block"]
-            miss = [p["url"] for p in pages if not p["blocks"].get(blk)]
-            t = _t(next(seq), "P1", "内容矩阵", f"全站补「{blk}」抽取块",
-                   f"{g['missing_pages']}/{g['total']} 页缺失；实测影响力增益 {gain.get(blk, '—')}（method.md 可抽取块）",
+            miss = [
+                p["url"] for p in pages
+                if not p["blocks"].get(blk)
+                and (blk in p.get("required_blocks", []) if "required_blocks" in p else True)
+            ]
+            t = _t(next(seq), "P1", "内容矩阵", f"在相关核心页补「{blk}」抽取块",
+                   f"{g['missing_pages']}/{g['total']} 个需要该信息块的页面缺失；"
+                   f"研究观察值 {gain.get(blk, '—')}，不是对本站的因果增益保证",
                    f"参照 content-patterns.md，在核心页补{blk}块；定义句需与事实卡逐字一致",
                    "内容", "M", {"type": "auto", "check": f"pages.block:{blk}",
                                  "desc": f"缺「{blk}」的页面数下降 ≥ 50%"},
@@ -239,13 +273,13 @@ def from_audit(audit: dict, cfg: dict, seq) -> list[dict]:
         t["baseline_count"] = len(noquote)
         out.append(t)
 
-    short = [p["url"] for p in pages if p["word_count"] < 1000 and p["word_count"] >= 100]
+    short = [p["url"] for p in pages if _has_issue(p, "THIN_CONTENT", "thin content")]
     if len(short) >= 3:
-        t = _t(next(seq), "P1", "内容矩阵", "核心页正文扩到 1000+ 词",
-               "高影响力页面平均 1,943 词，Bottom 四分位仅 170 词（method.md 内容长度）",
-               "优先扩产品页、案例页、对比页；加定义、数字表、步骤、边界说明，不是灌水",
-               "内容", "L", {"type": "auto", "check": "pages.wordcount_gte:1000",
-                             "desc": "正文 <1000 词的页面数下降 ≥ 40%"},
+        t = _t(next(seq), "P1", "内容矩阵", "按页面任务补齐核心事实",
+               "这些页面低于各自类型的任务完整性参考值；长页面研究是描述性观察，不构成统一 1000 词门槛",
+               "Pricing 补计划/credits 规则，Docs 补操作与边界，About 补实体事实；只补用户完成任务所需的信息",
+               "内容", "L", {"type": "auto", "check": "pages.no_thin_content",
+                             "desc": "受影响页面不再触发页面类型对应的 THIN_CONTENT"},
                affected=short[:30])
         t["baseline_count"] = len(short)
         out.append(t)
@@ -254,7 +288,7 @@ def from_audit(audit: dict, cfg: dict, seq) -> list[dict]:
     if audit.get("avg_score", 0) < 70:
         out.append(_t(next(seq), "P1", "页面技术", f"站点均分从 {audit.get('avg_score')} 提到 70",
                       "均分低于 70 说明整体处于「需要改造」区间（method.md 评分口径）",
-                      "按 audit.json 里分数最低的 10 页逐页改：H1 唯一、H2 拆到 6–10 节、列表密度 ≥0.35、加更新日期",
+                      "按 audit.json 里分数最低的 10 页逐页改；依据 page_kind 补任务所需事实、结构和证据，不跨类型套统一 H2/词数模板",
                       "内容", "L", {"type": "auto", "check": "site.avg_score_gte:70",
                                     "desc": "重跑 audit 均分 ≥ 70"},
                       affected=thin_h2[:10]))
@@ -270,9 +304,20 @@ def from_metrics(metrics: dict, cfg: dict, seq) -> list[dict]:
         rows = {p: m for p, m in metrics["platforms"].items() if m.get("market", "cn") == mk}
         if not rows:
             continue
+        web_rows = {p: m for p, m in rows.items() if m.get("search_enabled")}
+        if not web_rows:
+            out.append(_t(next(seq), "P0", "监测闭环",
+                          f"建立{mk_name}真实联网端 GEO baseline",
+                          f"本期 {len(rows)} 个平台端全部是闭卷 API；只能观察参数化知识中的品牌提及，"
+                          "citation 与 AI Search 表现均未测",
+                          "固定一组买家/选型 prompts，在真实联网端按新对话、多轮、记录终端/模型/日期/答案/citations；"
+                          "形成 citation、brand mention、referral、activation 周基线",
+                          "GEO顾问", "M", {"type": "manual",
+                          "desc": "至少一个目标平台有真实联网样本，且保留答案与 citations 原始证据"}, market=mk))
+            continue
         # mention_rate / own_domain_cite_rate 为 None = 该平台只采了点名题（未测），
         # 不参与平均；全 None 时该指标「未测」，不下结论工单，不编数。
-        rates = [m["mention_rate"] for m in rows.values() if m.get("mention_rate") is not None]
+        rates = [m["mention_rate"] for m in web_rows.values() if m.get("mention_rate") is not None]
         target = cfg.get("targets", {}).get("mention_rate", 0.3)
         if rates:
             avg = sum(rates) / len(rates)
@@ -285,7 +330,8 @@ def from_metrics(metrics: dict, cfg: dict, seq) -> list[dict]:
                               "GEO顾问", "L",
                               {"type": "auto", "check": f"metrics.mention_rate_gte:{mk}:{target}",
                                "desc": f"{mk_name}平均无提示提及率 ≥ {target:.0%}"}, market=mk))
-        own = [m["own_domain_cite_rate"] for m in rows.values() if m.get("own_domain_cite_rate") is not None]
+        own = [m["own_domain_cite_rate"] for m in web_rows.values()
+               if m.get("own_domain_cite_rate") is not None]
         if own and sum(own) / len(own) < 0.1:
             out.append(_t(next(seq), "P1", "外部证据",
                           f"{mk_name}让官网进得了 AI 的检索结果",
@@ -295,7 +341,7 @@ def from_metrics(metrics: dict, cfg: dict, seq) -> list[dict]:
                           {"type": "auto", "check": f"metrics.own_cite_gte:{mk}:0.1",
                            "desc": f"{mk_name}引用官网率 ≥ 10%"}, market=mk))
         # 品牌认知错误 → P0
-        for plat, m in rows.items():
+        for plat, m in web_rows.items():
             pr = m.get("probe") or {}
             if pr.get("samples") and (pr.get("own_domain_cite_rate") or 0) == 0:
                 continue
@@ -339,18 +385,20 @@ def entity_tasks(cfg: dict, seq) -> list[dict]:
     """实体消歧与事实底座——永远存在的基础包。"""
     b = cfg["brand"]
     return [
-        _t(next(seq), "P0", "实体消歧", "统一一句话定义，四处逐字一致",
-           "口径不一致是 AI 描述品牌漂移的头号原因（content-patterns.md 第 6 节）",
-           f"把「{b['name']}」的定义句同步到：首页首屏、关于页、JSON-LD description、llms.txt。逐字相同",
-           "内容", "S", {"type": "manual", "desc": "四处定义句文本完全一致（人工核对）"}),
-        _t(next(seq), "P0", "知识库", "建品牌事实卡并标注证据等级",
+        _t(next(seq), "P1", "实体消歧", "统一核心实体事实与定位",
+           "官网各核心页面若对品牌、产品边界和官网域名说法矛盾，会增加实体歧义；措辞无需逐字相同",
+           f"核对「{b['name']}」在首页与 About 的可见正文；若使用 JSON-LD/llms.txt，也必须与可见事实一致，"
+           "但二者不是必填门票",
+           "内容", "S", {"type": "manual", "desc": "核心实体事实一致，无冲突或无法核实的 claims"}),
+        _t(next(seq), "P1", "知识库", "建品牌事实卡并标注证据等级",
            "所有内容生产的事实底座；无来源的事实一律标待确认（method.md 采样纪律）",
            "填 content/facts.md：实体、别名、产品、关键数字、适用与不适用、禁用表达；每条标 A–E",
            "GEO顾问", "M", {"type": "manual", "desc": "facts.md 存在且每条事实有证据等级"}),
-        _t(next(seq), "P1", "知识库", "百科词条（实体消歧地基）",
-           "百科是品牌实体消歧的地基；baidu.com 同时是百度AI 37.7%、文心 29.0% 的引用来源",
-           "提交百度百科；海外市场同步争取 Wikipedia（需第三方来源支撑）", "市场", "M",
-           {"type": "manual", "desc": "词条通过审核并上线"}),
+        _t(next(seq), "P2", "外部证据", "争取真实独立第三方提及",
+           "独立评价与相关生态提及可提供外部佐证，但没有官方保证会带来 LLM citation",
+           "优先真实用户教程、独立评测与生态伙伴页；只有已满足 notability 与可靠来源要求时才考虑 Wikipedia，"
+           "不购买或伪造 mentions", "市场", "M",
+           {"type": "manual", "desc": "获得至少一条可验证、编辑独立的相关第三方提及"}),
         _t(next(seq), "P1", "监测闭环", "接入 AI 流量归因（渠道组 + 日志 + 来源快照）",
            "只测「被引用」不测「带来转化」，监测就是汇报表演；AI 来源会话是可见性投入的业务对账单"
            "（references/attribution.md）",

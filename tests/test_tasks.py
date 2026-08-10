@@ -13,10 +13,11 @@ import verify as V
 import deliverables as D
 
 
-def _plat(market="cn", mention=0.2, cite=0.5):
+def _plat(market="cn", mention=0.2, cite=0.5, searched=True):
     """mention/cite 传 None 表示该平台只采了点名题（未测）。"""
     return {"market": market, "label": "X", "samples": 3 if mention is not None else 0,
             "mention_rate": mention, "top1_rate": mention, "top3_rate": mention,
+            "search_enabled": searched, "citation_samples": 3 if searched else 0,
             "avg_rank": 2.0, "own_domain_cite_rate": cite,
             "competitor_mentions": {}, "top_cited_domains": {},
             "probe": {"samples": 2, "recognized_rate": 1.0, "own_domain_cite_rate": 0.5}}
@@ -54,6 +55,13 @@ class TestFromMetricsNone(unittest.TestCase):
         out = T.from_metrics(m, CFG, _seq())
         self.assertTrue(any("提及率" in t["title"] for t in out))
         self.assertTrue(any("检索结果" in t["title"] for t in out))
+
+    def test_closed_book_only_creates_baseline_not_growth_target(self):
+        m = _metrics({"openai": _plat(market="global", mention=0.0, cite=None, searched=False),
+                      "gemini": _plat(market="global", mention=0.3, cite=None, searched=False)})
+        out = T.from_metrics(m, {**CFG, "market": "global"}, _seq())
+        self.assertTrue(any("真实联网端 GEO baseline" in t["title"] for t in out))
+        self.assertFalse(any("无提示提及率" in t["title"] for t in out))
 
 
 class TestMarketAvg(unittest.TestCase):

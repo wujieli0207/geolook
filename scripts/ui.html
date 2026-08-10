@@ -236,7 +236,7 @@ const UI_D={en:{
 '按「未提及 + 无内容」排序 —— 顶部就是选题池':'Sorted by "not mentioned + no content" — top is your topic pool',
 '内容层的问题在差距诊断，这里是技术层':'Content issues live in Gap Diagnosis; this is the technical layer',
 '能不能被抓到、结构好不好。六维口径：可抓取 / 长度 / 结构 / 抽取块 / 权威 / 对题，判据全部来自公开实证数据。':'Crawlability and structure. Six dimensions: crawlable / length / structure / extraction blocks / authority / topical fit — all anchored in public empirical data.',
-'页面等级分布 · 均分':'Page grades · avg','全站抽取块缺口':'Site-wide extraction-block gaps','抽取块':'Block','缺失页数':'Missing','实测增益':'Lift','工单':'Ticket',
+'页面等级分布 · 均分':'Page grades · avg','按页面任务统计的抽取块缺口':'Extraction-block gaps by page task','抽取块':'Block','缺失页数':'Missing','观察相关':'Observed association','工单':'Ticket',
 '最需要改造的页面（分数从低到高）':'Pages needing work (lowest score first)','分数':'Score','词数':'Words','缺失抽取块':'Missing blocks','页面':'Page','清除筛选':'Clear filter',
 '点击等级 → 下方列表只看该等级的页面':'Click a grade to filter the list below','点击行 → 下方列表只看缺该块的页面；点工单号看怎么修。':'Click a row to filter pages; click the ticket ID for the fix.',
 '分数低只有三个原因，按顺序修':'Low scores have three causes — fix in order',
@@ -263,7 +263,7 @@ const UI_D={en:{
 '✦ 全自动引导':'✦ Auto-bootstrap','▶ 跑完整一期':'▶ Run full cycle','发布渠道':'Publishing channels','已就绪':'Ready','人工采样':'Manual','已配置':'Configured',
 '最近发布：':'Recent publishes:','发布到渠道':'Publish to channel','发布':'Publish','渠道配置':'Channel config','该文件的发布记录':'Publish history for this file',
 '选一个问题，就地开写':'Pick a question, write right here','换一题 →':'Switch question →','选择一个问题':'Pick a question','搜问题…':'Search…',
-'分发清单 · 这篇该铺到哪':'DISTRIBUTION · WHERE THIS GOES','这条任务要解决':'THIS TASK ANSWERS','必须包含的抽取块（实测增益）':'REQUIRED BLOCKS (MEASURED LIFT)',
+'分发清单 · 这篇该铺到哪':'DISTRIBUTION · WHERE THIS GOES','这条任务要解决':'THIS TASK ANSWERS','建议检查的抽取块（观察相关）':'SUGGESTED BLOCK CHECKS (OBSERVED ASSOCIATION)',
 '从事实库取用':'FROM BRAND FACTS','打开事实库 →':'Open Brand Facts →','可被引用度预检':'CITABILITY PRE-CHECK','发布后要做（人工）':'AFTER PUBLISHING (MANUAL)',
 '成稿':'Final','AI 初稿':'AI draft','大纲':'Outline','重新预检':'Re-check','发布为成稿':'Publish as final','发布到渠道…':'Publish to channels…','初稿风险':'DRAFT RISK',
 '你是谁，做什么':'Who you are, what you do','正在生成首份诊断':'Generating your first diagnosis',
@@ -300,7 +300,7 @@ const UI_D={en:{
 '被抢走的问题':'奪われた質問','你独占的问题':'独占している質問',
 '问题':'質問','类别':'カテゴリ','市场':'市場','你的提及':'言及','诊断':'診断','已有内容':'コンテンツ','编辑问题库':'質問を編集','AI 补充选题':'AI でトピック追加',
 '内容层的问题在差距诊断，这里是技术层':'コンテンツはギャップ診断で。ここは技術レイヤー',
-'页面等级分布 · 均分':'ページ等級分布 · 平均','全站抽取块缺口':'抽出ブロックのギャップ','抽取块':'ブロック','缺失页数':'欠落数','实测增益':'実測リフト','工单':'チケット',
+'页面等级分布 · 均分':'ページ等級分布 · 平均','按页面任务统计的抽取块缺口':'ページ役割別の抽出ブロック不足','抽取块':'ブロック','缺失页数':'欠落数','观察相关':'観察相関','工单':'チケット',
 '最需要改造的页面（分数从低到高）':'要改善ページ（低スコア順）','分数':'スコア','词数':'語数','缺失抽取块':'欠落ブロック','页面':'ページ','清除筛选':'フィルタ解除',
 '分数低只有三个原因，按顺序修':'低スコアの原因は 3 つ。順に直す',
 '内容缺口':'コンテンツ','阵地缺口':'チャネル','事实偏差':'ファクト','缺口问题':'ギャップ質問','当前状态':'状態','生成草稿':'下書き生成','建设方案':'構築プラン',
@@ -485,16 +485,16 @@ Object.assign(UI_D.en,{
 '你出现而对手全部缺席——守住，并把这类内容复制到别的题上。':'You appear while every rival is absent — hold it, and replicate this content on other questions.',
 '本期没有独占问题——先把「被抢走的问题」补上':'No owned questions this round — recover the lost ones first',
 '「问题」= 真实用户会向 AI 提的一句问题。改这里会改变所有页面的数字。带「点名」标记的属于品牌认知探测，不计入提及率。':'A “question” is a sentence a real user would ask AI. Editing here changes every number on the site. Rows marked “named” are brand-awareness probes, excluded from mention rate.',
-'robots 封禁 AI 抓取器':'robots blocking AI crawlers','未封禁':'Not blocked','正常':'OK','查看 robots.txt ↗':'View robots.txt ↗','查看 sitemap.xml ↗':'View sitemap.xml ↗',
+'robots · Search / Training':'robots · Search / Training','WAF/UA 初筛':'WAF/UA screening','未发现 Search 封禁':'No Search block found','正常':'OK','查看 robots.txt ↗':'View robots.txt ↗','查看 sitemap.xml ↗':'View sitemap.xml ↗',
 '已上线':'Live','到部署资产查看 →':'See in Assets →','页面可访问':'Pages reachable','定位问题页 ↓':'Locate problem pages ↓','语言覆盖':'Language coverage','相关工单 →':'Related tickets →',
-'70 分以上算「基本可用」。':'70+ counts as “usable”.','A · 可直接被引用':'A · directly citable','B · 基本可用':'B · usable','C · 需要改造':'C · needs work','D · 等于不存在':'D · effectively invisible',
-'GEO 最大的单项杠杆，右列是实测的被引用概率增益。':'The biggest single GEO lever; right column is the measured citation-probability lift.',
+'70 分以上算「基本可用」。':'70+ counts as “usable”.','A · 启发式检查较完整':'A · heuristic checks largely complete','B · 基本完整':'B · mostly complete','C · 有明显缺口':'C · clear gaps','D · 缺口较多':'D · many gaps',
+'按页面任务统计的抽取块缺口':'Extraction-block gaps by page task','分母只含需要该块的页面；右列是研究中的观察相关，不是本站因果保证。':'The denominator includes only pages that need the block; the right column is an observed research association, not a causal promise for this site.','观察相关':'Observed association',
 '定义':'Definition','操作步骤':'Steps','数字事实':'Numeric facts','利于召回':'Recall aid','对比':'Comparison',
 'AI 要引用你，需要同时满足：有东西可引（内容）、在它看的地方（阵地）、说得对（事实）。三者有序——内容没写，铺阵地是白铺。':'For AI to cite you, three things must hold at once: something citable (content), in the places it looks (channels), stated correctly (facts). In that order — without content, building channels is wasted.',
 '第一步 · 先修':'Step 1 · Fix first','第二步 · 再铺':'Step 2 · Then build','第三步 · 校准':'Step 3 · Calibrate',
 '影响最大':'Biggest impact','见效最快':'Fastest payoff','越曝光越亏':'Exposure amplifies errors',
 '个问题没有可被抽取的答案':' questions lack an extractable answer','个 P0/P1 阵地未被引用':' P0/P1 channels not yet cited','处口径待修或未比对':' facts to fix or not yet compared',
-'没有内容，铺阵地和改口径都没有落点。实测：含数字 +61.6%、定义 +57.3%、对比 +55.3% 被引用概率。':'Without content, channels and wording have nothing to land on. Measured lift in citation probability: numbers +61.6%, definitions +57.3%, comparisons +55.3%.',
+'没有内容，铺阵地和改口径都没有落点。研究观察到数字、定义、对比与被引用概率相关，但不是本站的因果增益保证。':'Without content, channels and wording have nothing to land on. Research observes an association between numbers, definitions, comparisons and citation probability; it is not a causal lift guarantee for this site.',
 '引擎实际会引用、你却没有内容的站点。P0 是地基。':'Sites the engines actually cite where you have no content. P0 is the foundation.',
 '提及率上升会放大错误说法。从「引擎表现」的样本回放里人工比对后记录在这里。':'Rising mentions amplify wrong claims. Compare manually from Engines → sample replay, then log here.',
 '「阵地」= 能被 AI 引用的站点。每条都标了它在 CN-GEO 187,818 条真实引用中的分量，不是拍脑袋排的。带 ✓ 的是本期采样中已被引用的阵地。':'A “channel” is a site AI can cite. Each is weighted by its share of 187,818 real CN-GEO citations — not gut feeling. ✓ marks channels already cited in this round’s samples.',
@@ -535,16 +535,16 @@ Object.assign(UI_D.ja,{
 '你出现而对手全部缺席——守住，并把这类内容复制到别的题上。':'自社のみ出現し競合は不在——守りつつ、この型を他の質問へ展開。',
 '本期没有独占问题——先把「被抢走的问题」补上':'独占質問なし——まず「奪われた質問」を取り返す',
 '「问题」= 真实用户会向 AI 提的一句问题。改这里会改变所有页面的数字。带「点名」标记的属于品牌认知探测，不计入提及率。':'「質問」= 実ユーザーが AI に聞く一文。ここを変えると全ページの数値が変わる。「指名」付きはブランド認知プローブで言及率には不算入。',
-'robots 封禁 AI 抓取器':'robots が AI クローラをブロック','未封禁':'ブロックなし','正常':'正常','查看 robots.txt ↗':'robots.txt を見る ↗','查看 sitemap.xml ↗':'sitemap.xml を見る ↗',
+'robots · Search / Training':'robots · Search / Training','WAF/UA 初筛':'WAF/UA 初期スクリーニング','未发现 Search 封禁':'Search ブロック未検出','正常':'正常','查看 robots.txt ↗':'robots.txt を見る ↗','查看 sitemap.xml ↗':'sitemap.xml を見る ↗',
 '已上线':'公開済み','到部署资产查看 →':'デプロイ資産で見る →','页面可访问':'ページ到達可能','定位问题页 ↓':'問題ページを特定 ↓','语言覆盖':'言語カバレッジ','相关工单 →':'関連チケット →',
-'70 分以上算「基本可用」。':'70 点以上で「基本利用可」。','A · 可直接被引用':'A · 直接引用可能','B · 基本可用':'B · 基本利用可','C · 需要改造':'C · 要改修','D · 等于不存在':'D · 実質不可視',
-'GEO 最大的单项杠杆，右列是实测的被引用概率增益。':'GEO 最大の単一レバー。右列は実測の引用確率リフト。',
+'70 分以上算「基本可用」。':'70 点以上で「基本利用可」。','A · 启发式检查较完整':'A · ヒューリスティック確認は概ね完了','B · 基本完整':'B · 基本的に完全','C · 有明显缺口':'C · 明確な不足','D · 缺口较多':'D · 不足が多い',
+'按页面任务统计的抽取块缺口':'ページ役割別の抽出ブロック不足','分母只含需要该块的页面；右列是研究中的观察相关，不是本站因果保证。':'分母はそのブロックが必要なページのみ。右列は研究上の観察相関であり、このサイトへの因果保証ではない。','观察相关':'観察相関',
 '定义':'定義','操作步骤':'手順','数字事实':'数値ファクト','利于召回':'想起支援','对比':'比較',
 'AI 要引用你，需要同时满足：有东西可引（内容）、在它看的地方（阵地）、说得对（事实）。三者有序——内容没写，铺阵地是白铺。':'AI に引用されるには 3 条件が同時に必要：引用できるもの（コンテンツ）、AI が見る場所（チャネル）、正しい記述（ファクト）。順序が重要——コンテンツなしのチャネル構築は無駄。',
 '第一步 · 先修':'ステップ 1 · まず修正','第二步 · 再铺':'ステップ 2 · 構築','第三步 · 校准':'ステップ 3 · 校正',
 '影响最大':'影響最大','见效最快':'即効性最大','越曝光越亏':'露出が誤りを増幅',
 '个问题没有可被抽取的答案':' 件の質問に抽出可能な回答がない','个 P0/P1 阵地未被引用':' 件の P0/P1 チャネルが未引用','处口径待修或未比对':' 件のファクトが要修正/未比較',
-'没有内容，铺阵地和改口径都没有落点。实测：含数字 +61.6%、定义 +57.3%、对比 +55.3% 被引用概率。':'コンテンツがなければチャネルも文言も着地しない。実測リフト：数値 +61.6%、定義 +57.3%、比較 +55.3%。',
+'没有内容，铺阵地和改口径都没有落点。研究观察到数字、定义、对比与被引用概率相关，但不是本站的因果增益保证。':'コンテンツがなければチャネルも文言も着地しない。数値・定義・比較と引用確率には研究上の観察相関があるが、このサイトへの因果的リフト保証ではない。',
 '引擎实际会引用、你却没有内容的站点。P0 是地基。':'エンジンが実際に引用するのに自社コンテンツがないサイト。P0 が土台。',
 '提及率上升会放大错误说法。从「引擎表现」的样本回放里人工比对后记录在这里。':'言及率の上昇は誤った記述も増幅する。エンジン → サンプルリプレイで比較し、ここに記録。',
 '「阵地」= 能被 AI 引用的站点。每条都标了它在 CN-GEO 187,818 条真实引用中的分量，不是拍脑袋排的。带 ✓ 的是本期采样中已被引用的阵地。':'「チャネル」= AI が引用できるサイト。各項目は CN-GEO 実引用 187,818 件中の比重で重み付け——勘ではない。✓ は今期サンプルで引用済み。',
@@ -1108,6 +1108,11 @@ async function pollJob(){
 /* ===================== 总览 ===================== */
 function headline(){
   const a=D.analytics,h=a.health,tr=a.trend||[];
+  const engs=a.engines||[];
+  const searched=engs.filter(e=>e.searched).reduce((n,e)=>n+(e.samples||0),0);
+  const closed=engs.filter(e=>!e.searched).reduce((n,e)=>n+(e.samples||0),0);
+  if(!searched&&closed)return['真实联网端 GEO 尚未测量',
+    `现有 ${closed} 条是闭卷 API 参数化知识快照，只能看模型是否记得品牌，不能当作 ChatGPT Search、Google AI 或 Perplexity 的提及/引用表现。先建立真实联网端 baseline。`];
   if(h.score==null)return['还没有采样数据','到「设置 → 运行任务」跑一期，才能开始诊断。'];
   const prev=tr.length>1?tr[tr.length-2]:null;
   const dm=prev&&prev.mention!=null&&tr[tr.length-1].mention!=null?((tr[tr.length-1].mention-prev.mention)*100).toFixed(1):null;
@@ -1124,15 +1129,15 @@ function vOverview(){
   const S=h.subs;
   const kpis=[
     ['GEO 健康分',h.score==null?'—':h.score,`${h.measured.length}/5 项可测${S.fact==null?' · 事实一致性未测':''}`],
-    ['提及率',pct(S.mention),'无提示样本中被主动提到'],
-    ['引用份额',pct(S.cite),'来源域名里属于你的比例'],
+    ['提及率',pct(S.mention),'真实联网无提示样本中被主动提到'],
+    ['引用份额',pct(S.cite),'联网答案来源域名里属于你的比例'],
     ['阵地覆盖',S.channel==null?'—':pct(S.channel),'已被 AI 引用的阵地占比'],
     ['内容承接',S.content==null?'—':pct(S.content),'目标问题已有成稿内容'],
   ];
   const open=(D.tasks||[]).filter(t=>t.status!=='done').sort((x,y)=>x.priority.localeCompare(y.priority)).slice(0,3);
   const engs=a.engines||[];
   const maxm=Math.max(.001,...engs.map(e=>e.mention||0));
-  const comp=a.competitors||{},topRival=(comp.table||[])[0];
+  const comp=a.competitors||{},topRival=S.mention==null?null:(comp.table||[])[0];
   const svg=(()=>{
     if(tr.length<2)return `<div class="muted" style="font-size:12.5px;padding:20px 0">已有 ${tr.length} 期数据，至少两期才能画趋势。</div>`;
     const W=620,H=170,P={l:8,r:8,t:12,b:10};
@@ -1187,7 +1192,7 @@ function vOverview(){
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px">
       <div class="card elev" style="padding:18px">
         <div style="font-size:15px;font-weight:500">各引擎表现</div>
-        <div style="font-size:11.5px;color:var(--t600);margin-bottom:8px">同一批问题在不同引擎上的差异，几乎完全由信源结构决定。</div>
+        <div style="font-size:11.5px;color:var(--t600);margin-bottom:8px">${engs.some(e=>e.searched)?'行内区分联网与闭卷口径。':'本期全部是闭卷 API 知识快照，不代表 AI Search 表现。'}</div>
         ${engs.map(e=>`<div style="display:flex;align-items:center;gap:10px;padding:5px 0">
           <span style="width:96px;font-size:12.5px;flex:none">${esc(e.label)}</span>
           <span class="bar" style="flex:1"><span style="width:${((e.mention||0)/maxm*100).toFixed(0)}%"></span></span>
@@ -1197,7 +1202,7 @@ function vOverview(){
       </div>
       <div class="card elev" style="padding:18px">
         <div style="font-size:15px;font-weight:500">你和对手的差距在哪一层</div>
-        <div style="font-size:11.5px;color:var(--t600);margin-bottom:8px">对手数据来自同一批采样中的竞品出现率；标 — 的层无法对对手测量。</div>
+        <div style="font-size:11.5px;color:var(--t600);margin-bottom:8px">对手数据来自同一批采样；闭卷样本只反映模型记忆，标 — 的层尚未联网测量。</div>
         ${[['曝光层 · 提及率',S.mention,topRival?topRival.presence:null,topRival?topRival.name:'—'],
            ['引用层 · 引用份额',S.cite,null,'不可测'],
            ['承接层 · 内容承接',S.content,null,'不可测']].map(([n,me,them,who])=>{
@@ -1234,7 +1239,7 @@ async function vEngines(){
     :esc(ex.excerpt)):'';
   const own=(D.brand.site||'').replace(/^https?:\/\//,'').split('/')[0].replace(/^www\./,'');
   return `<div style="padding:32px 44px 72px;max-width:1280px">
-    ${head('现状 · 引擎表现','引擎之间的差距，是各自偏好信源的差距','看每个引擎在引用谁——那就是你要去建设的阵地清单。API 采样与网页端结果口径不同，行内已标注是否联网。<span style="color:var(--a300);cursor:pointer" onclick="showMethod()">这些数字怎么算的 →</span>')}
+    ${head('现状 · 引擎表现','联网 Search 与闭卷 API 必须分开看','联网端可分析 citations；参数化知识只看模型是否记得品牌，不能据此判断 Search 可见性或平台优先级。行内已标注口径。<span style="color:var(--a300);cursor:pointer" onclick="showMethod()">这些数字怎么算的 →</span>')}
     <div class="tbl"><table class="table" style="margin-top:22px"><thead><tr>
       <th style="width:140px">引擎</th><th style="width:70px">样本</th><th style="width:90px">提及率</th>
       <th style="width:90px">提及位次</th><th style="width:120px">引用份额</th>
@@ -1605,7 +1610,7 @@ function vGaps(){
   const gt=ST.gapTab;
   const cards=[
     {k:'content',order:'第一步 · 先修',name:'内容缺口',v:contentGap.length,unit:'个问题没有可被抽取的答案',
-     sev:'影响最大',why:'没有内容，铺阵地和改口径都没有落点。实测：含数字 +61.6%、定义 +57.3%、对比 +55.3% 被引用概率。'},
+     sev:'影响最大',why:'没有内容，铺阵地和改口径都没有落点。研究观察到数字、定义、对比与被引用概率相关，但不是本站的因果增益保证。'},
     {k:'channel',order:'第二步 · 再铺',name:'阵地缺口',v:chanGap.length,unit:'个 P0/P1 阵地未被引用',
      sev:'见效最快',why:'引擎实际会引用、你却没有内容的站点。P0 是地基。'},
     {k:'fact',order:'第三步 · 校准',name:'事实偏差',v:fc.filter(f=>f.state!=='一致').length,unit:'处口径待修或未比对',
@@ -1991,7 +1996,7 @@ function vWorkbench(){
           <div style="font-size:11.5px;color:var(--t500)">${stat?('你当前提及 '+(stat.mention==null?'未采样':pct(stat.mention))+' · '+stat.samples+' 样本 · 内容'+stat.content):''}</div>
         </div>
         <div class="card elev" style="padding:14px;gap:9px">
-          <div style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--t600)">必须包含的抽取块（实测增益）</div>
+          <div style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--t600)">建议检查的抽取块（观察相关）</div>
           ${(ck?ck.checks.slice(2):[]).map(c=>`<div class="row" style="gap:8px;font-size:12.5px">
             <span class="dot" style="background:${c.ok?'var(--accent)':'#595d6c'}"></span>
             <span style="flex:1">${esc(c.t)}</span><span style="font-size:11px;color:var(--t600)">${esc(c.lift)}</span></div>`).join('')||'<div class="muted" style="font-size:12px">载入草稿后显示</div>'}
@@ -2675,13 +2680,14 @@ function vSiteAudit(){
     '无自有网站的商品/品牌（电商、线下、小程序等）不需要站点体检——AI 可见性靠外部阵地与内容承接。到「阵地地图」看该建哪些阵地，「问题库」看该写哪些内容。')}</div>`;
   if(!A.page_count)return `<div style="padding:32px 44px">${head('诊断 · 站点体检','还没有体检数据','到「设置 → 运行任务」跑「抓取站点」+「页面体检」。')}</div>`;
   const probe=site.ai_ua_probe||{},probeN=Object.keys(probe).length;
-  const uaBad=(site.ai_ua_blocked||[]).length;
+  const uaDenied=site.ai_ua_probe_denied||site.ai_ua_blocked||[];
+  const roles=site.ai_bots_blocked_by_role||{},searchBlocked=roles.search||[],trainingBlocked=roles.training||[];
   const partial=(site.ai_bots_partial||[]).length;
   const lch=site.llms_txt_check||{};
   const lbad=(lch.broken||[]).length+(lch.robots_blocked||[]).length;
   const flags=[
-    ['robots 封禁 AI 抓取器',(site.ai_bots_blocked||[]).length?('封禁 '+site.ai_bots_blocked.join('、')):partial?('部分路径受限（'+partial+' 个爬虫）'):'未封禁',!(site.ai_bots_blocked||[]).length&&!partial,'查看 robots.txt ↗'],
-    ['WAF/UA 实测',uaBad?('拒绝 '+site.ai_ua_blocked.join('、')):probeN?('实测放行 '+probeN+' 个爬虫'):'未探测（重跑抓取）',!uaBad,uaBad?'相关工单 →':'AI 爬虫 UA 抓首页'],
+    ['robots · Search / Training',searchBlocked.length?('Search 封禁 '+searchBlocked.join('、')):trainingBlocked.length?('Search 放行 · 训练拒绝 '+trainingBlocked.join('、')):partial?('部分路径受限（'+partial+' 个 crawler）'):'未发现 Search 封禁',!searchBlocked.length,'查看 robots.txt ↗'],
+    ['WAF/UA 初筛',uaDenied.length?('待官方 IP/日志核验：'+uaDenied.join('、')):probeN?('当前来源 '+probeN+' 个 UA 未被拒'):'未探测（重跑抓取）',!uaDenied.length,uaDenied.length?'核验任务 →':'仅为 UA 初筛'],
     ['sitemap.xml',site.has_sitemap?('有 · '+(site.sitemap_url_count||0)+' 条 URL'+(site.robots_sitemap_declared===false?' · robots 未声明':'')):'缺失',!!site.has_sitemap&&site.robots_sitemap_declared!==false,'查看 sitemap.xml ↗'],
     ['llms.txt',site.has_llms_txt?(lbad?('已上线 · '+lbad+' 条链接异常'):'已上线'):'缺失',!!site.has_llms_txt&&!lbad,'到部署资产查看 →'],
     ['页面可访问',(site.pages_ok||0)+' / '+(site.pages_crawled||0),(site.pages_ok||0)===(site.pages_crawled||0),'定位问题页 ↓'],
@@ -2705,15 +2711,23 @@ function vSiteAudit(){
       </div>`).join('')}
   </div>`:'';
   const gain={'数字事实':'+61.6%','定义':'+57.3%','对比':'+55.3%','操作步骤':'+41.2%','FAQ':'利于召回'};
-  const gnote={A:'可直接被引用',B:'基本可用',C:'需要改造',D:'等于不存在'};
+  const gnote={A:'启发式检查较完整',B:'基本完整',C:'有明显缺口',D:'缺口较多'};
   const gmax=Math.max(1,...['A','B','C','D'].map(g=>gd[g]||0));
   // 联动筛选：点等级/抽取块 → 下方页面列表过滤（数据范围=服务端返回的分数最低 40 页）
   const gradeOf=s=>s>=80?'A':s>=65?'B':s>=45?'C':'D';
   const ag=ST.agrade||null,ab=ST.ablk||null;
   let plist=pages;
   if(ag)plist=plist.filter(p=>gradeOf(p.score)===ag);
-  if(ab)plist=plist.filter(p=>!(p.blocks||{})[ab]);
+  if(ab)plist=plist.filter(p=>(p.required_blocks||[]).includes(ab)&&!(p.blocks||{})[ab]);
   const blkTask=b=>(D.tasks||[]).find(t=>((t.acceptance||{}).check||'')==='pages.block:'+b);
+  const missingRequired=p=>(p.required_blocks||[]).filter(k=>!(p.blocks||{})[k]);
+  const pageDiagnosis=p=>{
+    const codes=p.issue_codes||[];
+    if(codes.includes('SPA_SHELL'))return 'SPA 空壳';
+    if(codes.includes('RENDERING_RISK'))return '渲染兼容风险';
+    if(codes.includes('THIN_CONTENT'))return '薄内容';
+    return '—';
+  };
   return `<div style="padding:32px 44px 72px;max-width:1280px">
     ${head('诊断 · 站点体检','内容层的问题在差距诊断，这里是技术层','按「访问 → 定向 → 理解 → 可引用」四层看：每层依赖上一层，访问层失败时下游的一切优化在引擎侧不可见。页面六维评分口径来自公开实证数据。')}
     ${lchain}
@@ -2740,9 +2754,9 @@ function vSiteAudit(){
         <div class="muted" style="font-size:11px;margin-top:6px">点击等级 → 下方列表只看该等级的页面</div>
       </div>
       <div class="card elev" style="padding:18px">
-        <div style="font-size:15px;font-weight:500">全站抽取块缺口</div>
-        <div style="font-size:11.5px;color:var(--t600);margin-bottom:8px">GEO 最大的单项杠杆，右列是实测的被引用概率增益。</div>
-        <div class="tbl"><table class="table"><thead><tr><th>抽取块</th><th style="width:100px">缺失页数</th><th style="width:90px">实测增益</th><th style="width:110px">工单</th></tr></thead><tbody>
+        <div style="font-size:15px;font-weight:500">按页面任务统计的抽取块缺口</div>
+        <div style="font-size:11.5px;color:var(--t600);margin-bottom:8px">分母只含需要该块的页面；右列是研究中的观察相关，不是本站因果保证。</div>
+        <div class="tbl"><table class="table"><thead><tr><th>抽取块</th><th style="width:100px">缺失页数</th><th style="width:90px">观察相关</th><th style="width:110px">工单</th></tr></thead><tbody>
           ${(A.block_gap||[]).map(g=>{const t=blkTask(g.block);
             return `<tr style="cursor:pointer;${ab===g.block?'background:var(--deep)':''}" title="点击筛选下方缺这个块的页面"
               onclick="ST.ablk=ST.ablk===${esc(JSON.stringify(g.block))}?null:${esc(JSON.stringify(g.block))};render()">
@@ -2761,15 +2775,16 @@ function vSiteAudit(){
       ${(ag||ab)?`<span class="tag tag-accent">${ag?('等级 '+ag):''}${ag&&ab?' + ':''}${ab?('缺「'+ab+'」'):''} · ${plist.length} 页</span>
         <button class="btn btn-ghost" style="font-size:11.5px" onclick="ST.agrade=null;ST.ablk=null;render()">清除筛选</button>`:''}
     </div>
-    <div class="tbl"><table class="table"><thead><tr><th style="width:70px">分数</th><th style="width:70px">词数</th><th style="width:86px" title="可被独立引用的段落数 / H2 小节数——检索按段落选材，页面长不等于有可引之材">可引段落</th><th style="width:250px">缺失抽取块</th><th>页面</th></tr></thead><tbody>
+    <div class="tbl"><table class="table"><thead><tr><th style="width:70px">分数</th><th style="width:70px">词数</th><th style="width:86px" title="可被独立引用的段落数 / H2 小节数——检索按段落选材，页面长不等于有可引之材">可引段落</th><th style="width:120px">渲染/完整性</th><th style="width:190px">任务所需缺块</th><th>页面</th></tr></thead><tbody>
       ${plist.slice(0,(ag||ab)?40:12).map(pg=>`<tr>
         <td style="font-size:13px;color:${pg.score<45?'var(--a300)':'var(--t400)'}">${pg.score}</td>
         <td style="font-size:13px;color:var(--t400)">${pg.word_count}</td>
         <td style="font-size:13px;color:${pg.sections_total>=3&&pg.sections_quotable===0?'var(--accent)':'var(--t400)'}">${pg.sections_total!=null?(pg.sections_quotable+'/'+pg.sections_total):'—'}</td>
-        <td style="font-size:12.5px;color:var(--t500)">${esc(Object.keys(pg.blocks||{}).filter(k=>!pg.blocks[k]).join('、')||'—')}</td>
+        <td style="font-size:12.5px;color:var(--t500)">${esc(pageDiagnosis(pg))}</td>
+        <td style="font-size:12.5px;color:var(--t500)">${esc(missingRequired(pg).join('、')||'—')}</td>
         <td style="font-size:12.5px"><a href="${esc(pg.url)}" target="_blank" rel="noopener">${esc((pg.title||pg.url).slice(0,60))}</a></td></tr>`).join('')}
     </tbody></table></div>
-    <p class="muted" style="font-size:12px;margin-top:10px">词数接近 0 的是前端渲染空壳页——AI 抓取器看到的是空白，这是国内官网最常见的致命伤。修复清单见「行动计划」。</p>
+    <p class="muted" style="font-size:12px;margin-top:10px">低词数要分开判断：SPA 空壳是近乎无正文，渲染兼容风险需对照原始 HTML 与 rendered page，薄内容则只补该页面任务必需的事实；三者不是同一种问题。</p>
   </div>`;
 }
 

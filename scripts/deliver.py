@@ -380,10 +380,12 @@ def run(slug: str) -> Path:
              ("P0 待办", str(sum(1 for t in data["tasks"]
                                  if t["priority"] == "P0" and t["status"] != "done")))]
     if metrics:
-        rates = [m["mention_rate"] for m in metrics["platforms"].values()
-                 if m.get("mention_rate") is not None]
+        searched = [m for m in metrics["platforms"].values() if m.get("search_enabled")]
+        measured = searched or list(metrics["platforms"].values())
+        rates = [m["mention_rate"] for m in measured if m.get("mention_rate") is not None]
         if rates:
-            cards.append(("平均提及率", f"{sum(rates)/len(rates):.0%}"))
+            cards.append((("联网端" if searched else "闭卷API") + "平均提及率",
+                          f"{sum(rates)/len(rates):.0%}"))
     (out / "index.html").write_text(
         R.build_html(f"{cfg['brand']['name']} · GEO 服务交付 {G.today()}", ov, cards), "utf-8")
     (out / "README.md").write_text(_readme(cfg, data, notes), "utf-8")

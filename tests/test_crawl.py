@@ -79,5 +79,25 @@ class TestWordCountKana(unittest.TestCase):
         self.assertGreater(G.word_count("这是一个测试"), 0)
 
 
+class TestCrawlerRoles(unittest.TestCase):
+    def test_training_block_does_not_imply_search_block(self):
+        grouped = crawl.group_bots_by_role(["GPTBot", "ClaudeBot", "Google-Extended"])
+        self.assertEqual(grouped["search"], [])
+        self.assertEqual(grouped["user"], [])
+        self.assertEqual(grouped["training"], ["GPTBot", "ClaudeBot", "Google-Extended"])
+
+    def test_search_and_user_bots_are_separate(self):
+        grouped = crawl.group_bots_by_role(["OAI-SearchBot", "Perplexity-User"])
+        self.assertEqual(grouped["search"], ["OAI-SearchBot"])
+        self.assertEqual(grouped["user"], ["Perplexity-User"])
+
+    def test_llms_check_ignores_training_only_robots_block(self):
+        robots = "User-agent: GPTBot\nDisallow: /\n\nUser-agent: *\nAllow: /\n"
+        llms = "# Example\n- https://example.com/about"
+        with mock.patch.object(G, "fetch", return_value={"status": 200}):
+            result = crawl.check_llms_txt("https://example.com", llms, robots)
+        self.assertEqual(result["robots_blocked"], [])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -18,8 +18,9 @@ AUDIT = {
 }
 
 
-def plat(market, mention, label=None):
+def plat(market, mention, label=None, searched=True):
     d = {"market": market, "mention_rate": mention, "samples": 5,
+         "citation_samples": 5 if searched else 0, "search_enabled": searched,
          "top1_rate": 0.0, "top3_rate": 0.0, "avg_rank": None,
          "own_domain_cite_rate": None, "probe": {},
          "competitor_mentions": {}, "top_cited_domains": {}}
@@ -76,23 +77,45 @@ class TestBestWorstDegenerate(unittest.TestCase):
         self.assertIn("海外：未测", m)
         self.assertIn("国内最好", m)
 
+    def test_closed_book_api_does_not_claim_platform_priority(self):
+        m = md({"qwen": plat("cn", 0.5, "千问", searched=False),
+                "deepseek": plat("cn", 0.1, "DeepSeek", searched=False)})
+        self.assertIn("闭卷 API 快照", m)
+        self.assertIn("不能据此判断 AI Search", m)
+        self.assertNotIn("国内最好", m)
+
 
 class TestMarketAvgCards(unittest.TestCase):
     def test_split_cn_global(self):
         cards = dict(R.market_avg_cards(metrics_with({
             "qwen": plat("cn", 0.5), "deepseek": plat("cn", 0.5),
             "perplexity": plat("global", 0.1)})))
-        self.assertEqual(cards["国内平均提及率"], "50%")
-        self.assertEqual(cards["海外平均提及率"], "10%")
+        self.assertEqual(cards["国内联网端平均提及率"], "50%")
+        self.assertEqual(cards["海外联网端平均提及率"], "10%")
 
     def test_none_market_untested(self):
         cards = dict(R.market_avg_cards(metrics_with({
             "qwen": plat("cn", 0.5), "perplexity": plat("global", None)})))
-        self.assertEqual(cards["国内平均提及率"], "50%")
-        self.assertEqual(cards["海外平均提及率"], "未测")
+        self.assertEqual(cards["国内联网端平均提及率"], "50%")
+        self.assertEqual(cards["海外联网端平均提及率"], "未测")
+
+    def test_closed_book_card_is_labeled(self):
+        cards = dict(R.market_avg_cards(metrics_with({
+            "openai": plat("global", 0.2, searched=False)})))
+        self.assertEqual(cards["海外闭卷API平均提及率"], "20%")
 
     def test_no_metrics_no_cards(self):
         self.assertEqual(R.market_avg_cards(None), [])
+
+
+class TestAuditDelta(unittest.TestCase):
+    def test_incompatible_scoring_version_starts_new_baseline(self):
+        audit = {**AUDIT, "scoring_version": "page-kind-v2", "raw_page_count": 11}
+        prev = {"avg_score": 67.8, "scoring_version": None}
+        out = R.build_markdown(CFG, audit, None, None, prev, [])
+        self.assertIn("新评分口径基线", out)
+        self.assertIn("原始抓取：11 页；canonical 去重后审计：10 页", out)
+        self.assertNotIn("↑", out)
 
 
 if __name__ == "__main__":

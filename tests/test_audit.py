@@ -27,7 +27,9 @@ SPA_TEXT = "加载中"  # 空壳：远低于 120 词
 
 class TestIssueCodes(unittest.TestCase):
     def test_spa_shell_has_code(self):
-        r = A.score_page(make_page(text=SPA_TEXT), [])
+        r = A.score_page(make_page(
+            text=SPA_TEXT, h1=[], h2=[], para_count=0, li_count=0,
+        ), [])
         self.assertIn("SPA_SHELL", r["issue_codes"])
         self.assertEqual(len(r["issue_codes"]), len(r["issues"]))
 
@@ -43,8 +45,51 @@ class TestIssueCodes(unittest.TestCase):
         self.assertNotIn("SPA_SHELL", r["issue_codes"])
 
     def test_normal_low_page_still_spa(self):
-        r = A.score_page(make_page(url="https://example.com/products", text=SPA_TEXT), [])
+        r = A.score_page(make_page(
+            url="https://example.com/products", text=SPA_TEXT,
+            h1=[], h2=[], para_count=0, li_count=0,
+        ), [])
         self.assertIn("SPA_SHELL", r["issue_codes"])
+
+    def test_short_static_docs_is_thin_not_spa(self):
+        text = ("Getting Started\nCreate a video\nChoose a model, add a prompt, and submit. "
+                "Review the displayed credit cost, follow progress in History, and download the result. " * 3)
+        r = A.score_page(make_page(
+            url="https://example.com/docs/getting-started", text=text,
+            h1=["Getting Started"], h2=["Create a video"], para_count=4, li_count=3,
+        ), [])
+        self.assertNotIn("SPA_SHELL", r["issue_codes"])
+        self.assertIn("THIN_CONTENT", r["issue_codes"])
+
+    def test_streamed_structure_is_rendering_risk_not_spa(self):
+        r = A.score_page(make_page(
+            url="https://example.com/about", text="About Example\nLast updated: 2026-08-10",
+            h1=["About Example"], h2=["Company", "Contact"], para_count=6, li_count=0,
+        ), [])
+        self.assertNotIn("SPA_SHELL", r["issue_codes"])
+        self.assertIn("RENDERING_RISK", r["issue_codes"])
+
+
+class TestFaqDetection(unittest.TestCase):
+    def test_frequently_asked_questions_detected_as_visible_faq(self):
+        text = "Frequently Asked Questions\nWhat does it cost?\nPlans start at 10 dollars."
+        r = A.score_page(make_page(text=text, jsonld_types=["FAQPage"]), [])
+        self.assertTrue(r["blocks"]["FAQ"])
+        self.assertNotIn("SCHEMA_CONTENT_MISMATCH", r["issue_codes"])
+
+
+class TestCanonicalDedup(unittest.TestCase):
+    def test_query_variant_with_same_canonical_is_counted_once(self):
+        canonical = "https://example.com/pricing"
+        pages = [
+            make_page(url=canonical, canonical=canonical, final_url=canonical, text="Pricing plans " * 20),
+            make_page(url=canonical + "?return_to=/", canonical=canonical,
+                      final_url=canonical + "?return_to=/", text="Pricing plans " * 20),
+        ]
+        kept, dup = A.dedupe_pages_by_canonical(pages)
+        self.assertEqual(len(kept), 1)
+        self.assertEqual(kept[0]["url"], canonical)
+        self.assertEqual(len(dup), 1)
 
 
 class TestHowto(unittest.TestCase):
@@ -62,6 +107,29 @@ class TestHowto(unittest.TestCase):
         text = "怎么配置环境？请按下面的要点操作。" * 10
         r = A.score_page(make_page(text=text, li_count=6), [])
         self.assertTrue(r["blocks"]["操作步骤"])
+
+    def test_docs_imperative_sequence_is_howto(self):
+        text = "Open the generator. Choose a model. Add a prompt. Submit the task."
+        r = A.score_page(make_page(
+            url="https://example.com/docs/getting-started", text=text,
+            h1=["Getting Started"], h2=["Create a result"], para_count=5, li_count=4,
+        ), [])
+        self.assertTrue(r["blocks"]["操作步骤"])
+        self.assertNotIn("NO_HOWTO", r["issue_codes"])
+
+
+class TestPageTypeBlocks(unittest.TestCase):
+    def test_pricing_cards_count_as_numbers_and_comparison(self):
+        text = ("Creator $15 per month 600 credits 3 generations "
+                "Pro $30 per month 1500 credits 6 generations")
+        r = A.score_page(make_page(
+            url="https://example.com/pricing", text=text, h1=["Pricing"], h2=[],
+            para_count=4, li_count=8,
+        ), [])
+        self.assertTrue(r["blocks"]["数字事实"])
+        self.assertTrue(r["blocks"]["对比"])
+        self.assertNotIn("NO_NUMBERS", r["issue_codes"])
+        self.assertNotIn("NO_COMPARISON", r["issue_codes"])
 
 
 class TestJapaneseBlocks(unittest.TestCase):

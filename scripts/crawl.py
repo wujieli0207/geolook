@@ -139,12 +139,36 @@ def analyze_page(url: str, res: dict) -> dict:
     }
 
 
-# 关注的 AI 抓取器（robots 判定用产品名做 UA 匹配）
-AI_BOTS = ["GPTBot", "OAI-SearchBot", "ClaudeBot", "Claude-SearchBot", "PerplexityBot",
-           "Bytespider", "Baiduspider", "Sogou web spider", "YisouSpider", "Google-Extended"]
+# robots 控制必须区分搜索、用户触发访问与训练。允许训练 crawler 不等于能进入
+# AI Search，封训练 crawler 也不等于 AI Search 抓不到。
+AI_BOT_ROLES = {
+    "Googlebot": "search",
+    "bingbot": "search",
+    "OAI-SearchBot": "search",
+    "Claude-SearchBot": "search",
+    "PerplexityBot": "search",
+    "Baiduspider": "search",
+    "Sogou web spider": "search",
+    "YisouSpider": "search",
+    "ChatGPT-User": "user",
+    "Claude-User": "user",
+    "Perplexity-User": "user",
+    "GPTBot": "training",
+    "ClaudeBot": "training",
+    "Google-Extended": "training",
+    "Bytespider": "training",
+}
+AI_BOTS = list(AI_BOT_ROLES)
 
-# UA 差异探测用的真实 UA 串（各家公开文档口径）：robots 放行 ≠ WAF/CDN 放行，
-# 普通浏览器 200 而 AI 爬虫 403 的站，在引擎侧等于不存在，且站长自己看不出来
+
+def group_bots_by_role(blocked: list[str]) -> dict[str, list[str]]:
+    return {
+        role: [bot for bot in blocked if AI_BOT_ROLES.get(bot) == role]
+        for role in ("search", "user", "training")
+    }
+
+# UA 差异初筛使用各家公开 UA 串。robots 放行不保证 WAF/CDN 放行，但当前机器
+# 伪装 UA 不能冒充官方来源 IP；拒绝结果只能进入待核验队列。
 AI_UA_PROBES = {
     "GPTBot": "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; "
               "GPTBot/1.2; +https://openai.com/gptbot",
@@ -178,7 +202,10 @@ def check_robots(robots_txt: str, sample_paths: list[str]) -> tuple[list[str], l
 
 
 def probe_ai_ua(root: str, home: dict, robots_txt: str, delay: float) -> tuple[dict, list[str]]:
-    """换 AI 爬虫 UA 抓一次首页，检出 WAF/CDN 的差异封锁。
+    """换 AI 爬虫 UA 抓一次首页，记录需要进一步核验的差异响应。
+
+    该请求来自 GeoLook 当前机器，不来自 crawler 的官方 IP。UA 可以被伪装，
+    所以 403 只能说明“此来源 + 此 UA 被拒”，不能直接证明真实 bot 被 WAF 封锁。
     只对 robots 放行的爬虫探测（robots 都封了的，被 WAF 拦是站长本意，不算问题）；
     普通 UA 拿不到 200 时也不探测，那是站点本身的问题，不是差异封锁。"""
     probe: dict[str, int] = {}
@@ -211,7 +238,8 @@ def check_llms_txt(root: str, llms_txt: str, robots_txt: str) -> dict | None:
     sample = urls[:6]
     for u in sample:
         path = urlparse(u).path or "/"
-        bots_denied = [b for b in ("GPTBot", "ClaudeBot", "PerplexityBot")
+        bots_denied = [b for b in ("OAI-SearchBot", "Claude-SearchBot", "PerplexityBot",
+                                    "Googlebot", "bingbot")
                        if not G.robots_decision(groups, b, path)[0]]
         if bots_denied:
             robots_blocked.append({"url": u, "bots": bots_denied})
@@ -290,7 +318,7 @@ def run(slug: str, max_pages: int | None = None, delay: float = 0.5) -> dict:
     # 按 RFC 9309 语义判：通配符组封禁、多 UA 共享组、specificity 覆盖都能检出。
     blocked, partial = check_robots(robots_txt, [urlparse(u).path or "/" for u in candidates[:12]])
     # WAF/CDN 差异封锁：robots 说放行不代表真放行，换 AI 爬虫的 UA 实测一次
-    ua_probe, ua_blocked = probe_ai_ua(root, home, robots_txt, delay)
+    ua_probe, ua_denied_unverified = probe_ai_ua(root, home, robots_txt, delay)
     llms_check = check_llms_txt(root, llms_txt, robots_txt)
 
     # 索引污染：sitemap 里的带参/搜索/翻页 URL 会把低质片段灌进检索索引，
@@ -310,9 +338,13 @@ def run(slug: str, max_pages: int | None = None, delay: float = 0.5) -> dict:
         "sitemap_noisy_urls": len(noisy),
         "sitemap_noisy_example": (noisy[0] if noisy else None),
         "ai_bots_blocked": blocked,
+        "ai_bots_blocked_by_role": group_bots_by_role(blocked),
         "ai_bots_partial": partial,
         "ai_ua_probe": ua_probe,
-        "ai_ua_blocked": ua_blocked,
+        # 兼容旧消费者：没有官方来源 IP 证据时不再写成已确认 block。
+        "ai_ua_blocked": [],
+        "ai_ua_probe_denied": ua_denied_unverified,
+        "ai_ua_probe_verified": False,
         "llms_txt_check": llms_check,
         "pages_crawled": len(pages),
         "pages_ok": sum(1 for p in pages if p["status"] == 200),

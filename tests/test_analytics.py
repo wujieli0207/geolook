@@ -27,12 +27,12 @@ CFG = {
 
 def row(qid="q1", question="有什么好用的方案工具？", platform="p1", market="cn",
         probe=False, mentioned=False, cites=None, comps=None, rank=None,
-        own_cited=False, ok=True):
+        own_cited=False, ok=True, search_enabled=True):
     cites = cites or []
     return {
         "ok": ok, "platform": platform, "market": market, "question_id": qid,
         "question": question, "date": "2026-07-27", "brand_in_question": probe,
-        "search_enabled": True, "answer": "some answer text",
+        "search_enabled": search_enabled, "answer": "some answer text",
         "analysis": {
             "brand_mentioned": mentioned, "brand_rank": rank,
             "cited_domains": cites, "own_domain_cited": own_cited,
@@ -71,6 +71,13 @@ class TestHealthCite(Base):
         h = A.health("demo", None, [], rows)
         self.assertEqual(h["subs"]["cite"], 0.0)
 
+    def test_closed_book_mention_is_not_search_health(self):
+        self.make_project()
+        h = A.health("demo", None, [], [row(mentioned=True, search_enabled=False)])
+        self.assertIsNone(h["subs"]["mention"])
+        self.assertIsNone(h["subs"]["cite"])
+        self.assertIsNone(h["score"])
+
 
 class TestVerdict(Base):
     def test_single_platform_no_best_claim(self):
@@ -106,6 +113,23 @@ class TestVerdict(Base):
                 row(platform="b", probe=True, qid="q2", question="Acme 是什么？", mentioned=True)]
         engs = {e["platform"]: e for e in A.engines("demo", rows, None)}
         self.assertNotIn("最好", engs["a"]["verdict"])
+
+    def test_closed_book_verdict_is_not_search_or_citation_claim(self):
+        self.make_project()
+        eng = A.engines(
+            "demo", [row(platform="closed", mentioned=True, search_enabled=False)], None
+        )[0]
+        self.assertIn("闭卷 API 知识快照", eng["verdict"])
+        self.assertNotIn("从未引用你的域名", eng["verdict"])
+        self.assertNotIn("最好", eng["verdict"])
+
+    def test_closed_book_zero_is_not_called_invisible(self):
+        self.make_project()
+        eng = A.engines(
+            "demo", [row(platform="closed", mentioned=False, search_enabled=False)], None
+        )[0]
+        self.assertIn("闭卷 API 未检出品牌", eng["verdict"])
+        self.assertNotIn("完全不可见", eng["verdict"])
 
 
 class TestEnginesCiteShare(Base):

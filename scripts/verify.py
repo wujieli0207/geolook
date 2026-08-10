@@ -87,9 +87,13 @@ def check(task: dict, audit: dict, metrics: dict) -> tuple[bool | None, str, dic
 
     try:
         if expr == "site.no_ai_bot_block":
-            blocked = site.get("ai_bots_blocked") or []
-            return (not blocked), ("robots 未封禁任何 AI 抓取器" if not blocked
-                                   else f"仍封禁：{'、'.join(blocked)}"), None
+            by_role = site.get("ai_bots_blocked_by_role") or {}
+            blocked = by_role.get("search") if by_role else None
+            if blocked is None:
+                training = {"GPTBot", "ClaudeBot", "Google-Extended", "Bytespider"}
+                blocked = [b for b in (site.get("ai_bots_blocked") or []) if b not in training]
+            return (not blocked), ("robots 未封禁搜索 crawler" if not blocked
+                                   else f"仍封禁搜索 crawler：{'、'.join(blocked)}"), None
         if expr == "site.no_ai_ua_block":
             bad = site.get("ai_ua_blocked") or []
             probe = site.get("ai_ua_probe") or {}
@@ -170,7 +174,8 @@ def check(task: dict, audit: dict, metrics: dict) -> tuple[bool | None, str, dic
             # 功能页（登录/联系页等）天然低词数，和 audit 用同一条规则豁免，
             # 否则一张 SPA 空壳工单会被联系页永远卡在未达标
             aff_real = [u for u in aff if not A.FUNC_PAGE.search(urlparse(u).path)]
-            bad = [u for u in aff_real if pages.get(u, {}).get("word_count", 0) < 120]
+            bad = [u for u in aff_real
+                   if "SPA_SHELL" in (pages.get(u, {}).get("issue_codes") or [])]
             return (not bad), f"{base - len(bad)}/{base} 页已能抓到正文", \
                 {"label": "抓不到正文的页面", "cur": len(bad), "target": 0, "op": "lte", "base": base}
         if expr == "pages.has_jsonld":
@@ -181,7 +186,11 @@ def check(task: dict, audit: dict, metrics: dict) -> tuple[bool | None, str, dic
             blk = expr.split(":", 1)[1]
             # 基线用生成工单时的真实缺口数；旧工单没有该字段退回 affected 长度
             base = task.get("baseline_count", len(aff))
-            cur = sum(1 for p in audit.get("pages", []) if not p["blocks"].get(blk))
+            cur = sum(
+                1 for p in audit.get("pages", [])
+                if not p["blocks"].get(blk)
+                and (blk in p.get("required_blocks", []) if "required_blocks" in p else True)
+            )
             return cur <= base * 0.5, f"缺「{blk}」页面 {cur}（基线 {base}，目标 ≤{int(base*0.5)}）", \
                 {"label": f"缺「{blk}」块的页面", "cur": cur, "target": int(base * 0.5),
                  "op": "lte", "base": base}
@@ -191,6 +200,13 @@ def check(task: dict, audit: dict, metrics: dict) -> tuple[bool | None, str, dic
             cur = sum(1 for p in audit.get("pages", []) if 100 <= p["word_count"] < n)
             return cur <= base * 0.6, f"正文 <{n} 词的页面 {cur}（基线 {base}，目标 ≤{int(base*0.6)}）", \
                 {"label": f"正文不足 {n} 词的页面", "cur": cur, "target": int(base * 0.6),
+                 "op": "lte", "base": base}
+        if expr == "pages.no_thin_content":
+            base = task.get("baseline_count", len(aff))
+            cur = sum(1 for u in aff
+                      if "THIN_CONTENT" in (pages.get(u, {}).get("issue_codes") or []))
+            return cur == 0, f"仍有 {cur}/{base} 个受影响页面未达到各自任务完整性", \
+                {"label": "仍需补核心事实的页面", "cur": cur, "target": 0,
                  "op": "lte", "base": base}
 
         if expr.startswith("metrics.mention_rate_gte:"):
