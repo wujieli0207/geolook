@@ -222,7 +222,7 @@ def build_markdown(cfg, audit, metrics, prev_m, prev_a, todos) -> str:
     A("## 四、AI 答案可见性")
     A("")
     if not metrics or not metrics.get("platforms"):
-        A("本期没有采样数据。API 平台配好 Key 后跑 `sample`，网页端平台用 `sample-sheet` 导出人工采样表。")
+        A("本期没有采样数据。GeoLook 技术体检与 API / 网页端采样可以分期执行；没有样本不代表 API Key 缺失。")
         A("")
     else:
         stale = metrics.get("date") and metrics["date"] != G.today()
