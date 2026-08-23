@@ -214,8 +214,16 @@ AI_UA_PROBES = {
               "GPTBot/1.2; +https://openai.com/gptbot",
     "ClaudeBot": "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; "
                  "ClaudeBot/1.0; +claudebot@anthropic.com",
-    "PerplexityBot": "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; "
+    "OAI-SearchBot": "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; "
+                     "OAI-SearchBot/1.0; +https://openai.com/bot)",
+    "ChatGPT-User": "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; "
+                    "ChatGPT-User/1.0; +https://openai.com/bot",
+    "Claude-SearchBot": "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; "
+                        "Claude-SearchBot/1.0; +https://claude.ai",
+    "PerplexityBot": "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; "
                      "PerplexityBot/1.0; +https://perplexity.ai/perplexitybot",
+    "Google-Extended": "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; "
+                       "Google-Extended",
     "Bytespider": "Mozilla/5.0 (Linux; Android 5.0) AppleWebKit/537.36 (KHTML, like Gecko) "
                   "Mobile Safari/537.36 (compatible; Bytespider; spider-feedback@bytedance.com)",
 }
