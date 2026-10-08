@@ -249,6 +249,14 @@ def cmd_crawl(a):
     crawl.run(a.slug, max_pages=a.max_pages)
 
 
+def cmd_probe(a):
+    import crawl
+
+    result = crawl.probe(a.url)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    sys.exit(0 if result["pass"] else 2)
+
+
 def cmd_audit(a):
     import audit
 
@@ -524,6 +532,10 @@ def main():
     s.add_argument("--slug", required=True)
     s.add_argument("--max-pages", type=int, default=None, dest="max_pages")
     s.set_defaults(func=cmd_crawl)
+
+    s = sub.add_parser("probe", help="单 URL AI crawler 可达性检查（不建项目；P0/P1 时退出码 2）")
+    s.add_argument("--url", required=True)
+    s.set_defaults(func=cmd_probe)
 
     s = sub.add_parser("audit", help="页面 GEO 体检")
     s.add_argument("--slug", required=True)

@@ -126,3 +126,33 @@ class RegisteredCoreTests(unittest.TestCase):
   self.assertIn(core,result);self.assertIn(root,result);self.assertEqual(len(result),3)
  def test_core_capacity_fails_explicitly(self):
   with self.assertRaises(ValueError):crawl.select_candidates(['https://x.test/core'],'https://x.test',['https://x.test'],1)
+
+
+class TestGradeCrawler(unittest.TestCase):
+    def _site(self, blocked=(), denied=()):
+        return {"ai_bots_blocked_by_role": crawl.group_bots_by_role(list(blocked)),
+                "ai_ua_probe_denied": list(denied), "ai_ua_probe_verified": False}
+
+    def test_search_robots_block_is_p0(self):
+        out = crawl.grade_crawler(self._site(blocked=["OAI-SearchBot"]), crawl.ALLOW_ALL)
+        self.assertEqual([(f["level"], f["code"]) for f in out], [("P0", "SEARCH_ROBOTS_BLOCK")])
+
+    def test_user_agent_denial_is_p1_with_data_gap(self):
+        out = crawl.grade_crawler(self._site(denied=["Claude-User"]), crawl.ALLOW_ALL)
+        self.assertEqual([f["code"] for f in out], ["UA_PROBE_DENIED_SEARCH_USER", "UNVERIFIED_WAF_SIGNAL"])
+
+    def test_training_denial_respects_policy(self):
+        policy = {"search": "allow", "user": "allow", "training": "deny"}
+        out = crawl.grade_crawler(self._site(blocked=["GPTBot"], denied=["Bytespider"]), policy)
+        self.assertEqual([f["code"] for f in out], ["UNVERIFIED_WAF_SIGNAL"])
+
+    def test_probe_covers_every_user_bot(self):
+        probed = {b for b in crawl.AI_UA_PROBES if crawl.AI_BOT_ROLES[b] == "user"}
+        self.assertEqual(probed, {"ChatGPT-User", "Claude-User", "Perplexity-User"})
+
+    def test_probe_fails_when_homepage_unreachable(self):
+        with mock.patch.object(G, "fetch_text", return_value=""), \
+             mock.patch.object(G, "fetch", return_value={"status": 503, "html": ""}):
+            result = crawl.probe("https://example.com/")
+        self.assertFalse(result["pass"])
+        self.assertEqual(result["findings"][0]["code"], "HOMEPAGE_UNREACHABLE")

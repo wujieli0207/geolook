@@ -228,6 +228,10 @@ AI_UA_PROBES = {
                      "OAI-SearchBot/1.0; +https://openai.com/bot)",
     "ChatGPT-User": "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; "
                     "ChatGPT-User/1.0; +https://openai.com/bot",
+    "Claude-User": "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; "
+                   "Claude-User/1.0; +Claude-User@anthropic.com)",
+    "Perplexity-User": "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; "
+                       "Perplexity-User/1.0; +https://perplexity.ai/perplexity-user)",
     "Claude-SearchBot": "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; "
                         "Claude-SearchBot/1.0; +https://claude.ai",
     "PerplexityBot": "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; "
@@ -276,10 +280,78 @@ def probe_ai_ua(root: str, home: dict, robots_txt: str, delay: float) -> tuple[d
             continue
         res = G.fetch(root, timeout=10, retries=0, ua=ua)
         probe[bot] = res["status"]
-        if res["status"] in (401, 403, 406, 429, 451, 503):
+        if res["status"] in DENIED_STATUSES:
             ua_blocked.append(bot)
         time.sleep(delay)
     return probe, ua_blocked
+
+
+DENIED_STATUSES = (401, 403, 406, 429, 451, 503)
+ALLOW_ALL = {"search": "allow", "user": "allow", "training": "allow"}
+
+
+def grade_crawler(site: dict, policy: dict) -> list[dict]:
+    """按声明的 crawler 策略给可达性定级，mini-geo 周期监控与 probe 共用。
+
+    search/user 角色决定 AI 搜索可见性：robots 拒绝为 P0，UA 探测被拒为 P1。
+    UA 探测不来自官方 IP，被拒时另记 Data Gap。"""
+    out = []
+    by_role = site.get("ai_bots_blocked_by_role") or {}
+    for role in ("search", "user"):
+        blocked = by_role.get(role) or []
+        if policy.get(role) == "allow" and blocked:
+            out.append({"level": "P0", "code": f"{role.upper()}_ROBOTS_BLOCK",
+                        "title": f"{role} crawler 被 robots 拒绝", "evidence": ", ".join(blocked), "key": role})
+    denied = site.get("ai_ua_probe_denied") or []
+    if denied:
+        search_user = [b for b in denied if AI_BOT_ROLES.get(b) in ("search", "user")]
+        training = [b for b in denied if b not in search_user]
+        note = "（拒绝状态码，待官方 IP 或边缘日志确认）"
+        if search_user:
+            out.append({"level": "P1", "code": "UA_PROBE_DENIED_SEARCH_USER",
+                        "title": "AI search/user agent 疑似被 WAF/CDN 差异拦截",
+                        "evidence": ", ".join(search_user) + note, "key": "site"})
+        if training and policy.get("training") == "allow":
+            out.append({"level": "P2", "code": "UA_PROBE_DENIED_TRAINING",
+                        "title": "AI training agent 疑似被拦截且与声明策略不一致",
+                        "evidence": ", ".join(training) + note, "key": "training"})
+        if not site.get("ai_ua_probe_verified"):
+            out.append({"level": "Data Gap", "code": "UNVERIFIED_WAF_SIGNAL",
+                        "title": "WAF/UA 拒绝尚未由官方 IP 或边缘日志验证",
+                        "evidence": ", ".join(denied), "key": "site"})
+    training = by_role.get("training") or []
+    if policy.get("training") == "allow" and training:
+        out.append({"level": "P1", "code": "TRAINING_POLICY_DRIFT", "title": "训练 crawler 策略与项目声明不一致",
+                    "evidence": ", ".join(training), "key": "training"})
+    return out
+
+
+def probe(url: str, policy: dict = ALLOW_ALL, delay: float = 0.3) -> dict:
+    """单 URL 的 crawler 可达性检查：不建项目、不落盘（mini-launch 上线检查用）。"""
+    root = url.rstrip("/")
+    robots_txt = G.fetch_text(G.normalize_url(root, "/robots.txt"))
+    home = G.fetch(root)
+    blocked, partial = check_robots(robots_txt, [])
+    ua_probe, ua_denied = probe_ai_ua(root, home, robots_txt, delay)
+    site = {
+        "root": root,
+        "checked_at": G.now_iso(),
+        "home_status": home.get("status"),
+        "has_robots": bool(robots_txt),
+        "ai_bots_blocked": blocked,
+        "ai_bots_blocked_by_role": group_bots_by_role(blocked),
+        "ai_bots_partial": partial,
+        "ai_ua_probe": ua_probe,
+        "ai_ua_probe_denied": ua_denied,
+        "ai_ua_probe_verified": False,
+    }
+    findings = grade_crawler(site, policy)
+    if site["home_status"] != 200:
+        findings.insert(0, {"level": "P0", "code": "HOMEPAGE_UNREACHABLE", "title": "首页普通 UA 未返回 200",
+                            "evidence": str(site["home_status"]), "key": "site"})
+    site["findings"] = findings
+    site["pass"] = not any(f["level"] in ("P0", "P1") for f in findings)
+    return site
 
 
 def check_llms_txt(root: str, llms_txt: str, robots_txt: str) -> dict | None:
