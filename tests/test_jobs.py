@@ -71,8 +71,20 @@ class JobsTest(unittest.TestCase):
         proc = mock.Mock()
         proc.pid = 424242
         proc.wait.return_value = 0
-        with mock.patch.object(J.subprocess, "Popen", return_value=proc):
-            job = J.start("x", "audit")
+        threads = []
+        real_thread = J.threading.Thread
+        def tracked_thread(*args, **kwargs):
+            thread = real_thread(*args, **kwargs)
+            threads.append(thread)
+            return thread
+        with mock.patch.object(J.subprocess, "Popen", return_value=proc), \
+             mock.patch.object(J.threading, "Thread", side_effect=tracked_thread):
+            try:
+                job = J.start("x", "audit")
+            finally:
+                for thread in threads:
+                    thread.join(timeout=5)
+                    self.assertFalse(thread.is_alive())
         j = J.get(job["id"])
         self.assertEqual(j["pid"], 424242)
 

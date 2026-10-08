@@ -36,7 +36,7 @@ def load_env(path: Path | None = None):
         os.environ.setdefault(k.strip(), v.strip().strip("'\""))
 
 
-load_env()
+# Credentials are supplied by the owning launcher from ~/.env.d.
 
 UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "

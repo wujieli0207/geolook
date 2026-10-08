@@ -125,6 +125,16 @@ def stratified_candidates(ranked_urls: list[str], limit: int) -> list[str]:
     return selected
 
 
+def select_candidates(seeds, root, ranked_candidates, limit):
+    # Registered core pages are a coverage contract, before optional locale sampling.
+    required = rank(seeds, root)
+    required_keys = {u.rstrip('/') for u in required}
+    remaining = [u for u in ranked_candidates if u.rstrip('/') not in required_keys]
+    if len(required) > limit:
+        raise ValueError('page limit is smaller than registered core-page count')
+    return required + stratified_candidates(remaining, limit - len(required))
+
+
 def analyze_page(url: str, res: dict) -> dict:
     soup = G.parse_html(res["html"])
     text = G.main_text(soup)
@@ -332,7 +342,7 @@ def run(slug: str, max_pages: int | None = None, delay: float = 0.5) -> dict:
 
     seeds = [u for u in cfg.get("pages", {}).get("seed", []) if u]
     ranked_candidates = rank(seeds + sitemap_urls + link_urls, root)
-    candidates = stratified_candidates(ranked_candidates, limit)
+    candidates = select_candidates(seeds, root, ranked_candidates, limit)
     pool_buckets: dict[str, int] = {}
     selected_buckets: dict[str, int] = {}
     for url in ranked_candidates:

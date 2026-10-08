@@ -201,23 +201,7 @@ def read_asset(slug: str, rel: str) -> dict:
 
 
 def write_env(updates: dict[str, str]):
-    """更新项目根目录 .env：值为空表示删除该行。同步进当前进程环境，让界面立即生效；
-    任务子进程每次启动都重读 .env，天然生效。"""
-    path = G.ROOT / ".env"
-    lines = path.read_text("utf-8").splitlines() if path.exists() else []
-    for k, v in updates.items():
-        pat = re.compile(rf"\s*(export\s+)?{re.escape(k)}\s*=")
-        lines = [ln for ln in lines if not pat.match(ln)]
-        if v:
-            lines.append(f"{k}={v}")
-            os.environ[k] = v
-        else:
-            os.environ.pop(k, None)
-    path.write_text("\n".join(lines) + ("\n" if lines else ""), "utf-8")
-    try:
-        path.chmod(0o600)  # 密钥文件不给同机其他用户读
-    except OSError:
-        pass
+    raise PermissionError("Credentials are managed in ~/.env.d; model config requires owner approval")
 
 
 def create_project(url: str, name: str, slug: str, market: str, max_pages: int) -> dict:
@@ -334,8 +318,8 @@ class Handler(BaseHTTPRequestHandler):
                     rows.append({"code": code, "label": spec["name"], "market": spec["market"],
                                  "search": spec.get("search", False), "env": spec["key_env"],
                                  "ok": S.available(code),
-                                 "key_tail": key[-4:] if len(key) >= 8 else "",
-                                 "model": os.environ.get(menv) or spec.get("model", "") if menv else spec.get("model", ""),
+                                 "key_tail": "",
+                                 "model": S.model_for(code),
                                  "model_env": menv,
                                  "model_set": bool(menv and os.environ.get(menv)),
                                  "note": spec.get("note", "")})
@@ -547,27 +531,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": True})
 
             if p == "/api/keys":
-                import publish as P
-                import sample as S
-                allowed = set()
-                for spec in S.PROVIDERS.values():
-                    allowed.add(spec["key_env"])
-                    if spec.get("model_env"):
-                        allowed.add(spec["model_env"])
-                for spec in P.PUBLISHERS.values():
-                    allowed.update(spec["env"])
-                updates = body.get("updates")
-                if not isinstance(updates, dict) or not updates:
-                    return self._json({"ok": False, "error": "updates 必须是非空对象"}, 400)
-                bad = [k for k in updates if k not in allowed]
-                if bad:
-                    return self._json({"ok": False,
-                                       "error": f"不允许的变量：{', '.join(bad)}"}, 400)
-                clean = {k: str(v or "").strip() for k, v in updates.items()}
-                if any("\n" in v or "\r" in v for v in clean.values()):
-                    return self._json({"ok": False, "error": "值不能包含换行"}, 400)
-                write_env(clean)
-                return self._json({"ok": True})
+                return self._json({"ok": False, "error": "Credentials and pinned models are operator-managed; UI writes disabled"}, 403)
 
             if p.startswith("/api/publishcfg/"):
                 import publish as P

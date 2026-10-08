@@ -30,105 +30,18 @@ import geolib as G
 # 平台注册表：code -> 配置。market 决定这个平台该问哪一套问题库。
 # 观测集合（2026-07 定）：国内 = 智谱GLM/豆包/DeepSeek/Kimi/MiniMax/纳米AI/百度AI；
 # 海外 = Gemini/ChatGPT/Claude/Grok/Perplexity。纳米AI、百度AI 无公开 API，走人工采样。
+# Logical model families only. Explicit catalog slugs live in replicate.json.
 PROVIDERS = {
-    # ---------------- 国内 ----------------
-    "glm": {
-        "name": "智谱GLM", "market": "cn",
-        "base": "https://open.bigmodel.cn/api/paas/v4",
-        # 采样默认用各家的轻量档：测的是「模型认不认识这个品牌」，不是推理质量，口径一致优先。
-        "model": "glm-4-flash",
-        "model_env": "GLM_MODEL",
-        "key_env": "ZHIPUAI_API_KEY",
-        "search": False,
-        "note": "OpenAI 兼容端点，不联网；智谱清言网页版联网行为需人工采",
-    },
-    "doubao": {
-        # 火山方舟。联网要在控制台开通「内容插件」（console.volcengine.com/common-buy/CC_content_plugin）。
-        # 没开通时自动降级成不联网采样，不会中断整期。
-        "name": "豆包(方舟API)", "market": "cn",
-        "protocol": "ark",
-        "base": "https://ark.cn-beijing.volces.com/api/v3",
-        "model": "doubao-seed-1-6-250615",
-        "model_env": "ARK_MODEL",
-        "key_env": "ARK_API_KEY",
-        "search": True,
-        "note": "开通内容插件后走 responses+web_search 并返回引用；否则退回参数化知识采样",
-    },
-    "deepseek": {
-        "name": "DeepSeek", "market": "cn",
-        "base": "https://api.deepseek.com/v1",
-        "model": "deepseek-v4-flash",
-        "model_env": "DEEPSEEK_MODEL",
-        "key_env": "DEEPSEEK_API_KEY",
-        "search": False,
-        "note": "官方 API 不联网，测的是模型参数化知识里的品牌认知",
-    },
-    "kimi": {
-        "name": "Kimi", "market": "cn",
-        "base": "https://api.moonshot.cn/v1",
-        "model": "kimi-k2-0905-preview",
-        "model_env": "MOONSHOT_MODEL",
-        "key_env": "MOONSHOT_API_KEY",
-        "search": False,
-        "note": "默认不联网；需要联网请在网页端采样",
-    },
-    "minimax": {
-        "name": "MiniMax", "market": "cn",
-        "base": "https://api.minimaxi.com/v1",
-        "model": "MiniMax-M2",
-        "model_env": "MINIMAX_MODEL",
-        "key_env": "MINIMAX_API_KEY",
-        "search": False,
-        "note": "OpenAI 兼容端点，不联网；海螺 AI 网页版需人工采",
-    },
-    # ---------------- 海外 ----------------
-    "gemini": {
-        "name": "Gemini", "market": "global",
-        "base": "https://generativelanguage.googleapis.com/v1beta/openai",
-        "model": "gemini-2.5-flash",
-        "model_env": "GEMINI_MODEL",
-        "key_env": "GEMINI_API_KEY",
-        "search": False,
-        "note": "OpenAI 兼容端点不带 grounding；Google AI Overview 要在网页端采",
-    },
-    "openai": {
-        "name": "OpenAI API", "market": "global",
-        "base": os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1"),
-        "model": "gpt-4o-mini",
-        "model_env": "OPENAI_MODEL",
-        "key_env": "OPENAI_API_KEY",
-        "search": False,
-        "note": "Chat Completions 默认不联网；ChatGPT 网页版的搜索行为要另外采",
-    },
-    "claude": {
-        # Anthropic 原生 Messages API：响应是 content 块列表，不是 OpenAI 的 choices，走专用协议。
-        "name": "Claude", "market": "global",
-        "protocol": "anthropic",
-        "base": "https://api.anthropic.com/v1",
-        "model": "claude-sonnet-5",
-        "model_env": "ANTHROPIC_MODEL",
-        "key_env": "ANTHROPIC_API_KEY",
-        "search": False,
-        "note": "API 不联网；Claude 网页版（开 Web Search）需人工采",
-    },
-    "grok": {
-        "name": "Grok", "market": "global",
-        "base": "https://api.x.ai/v1",
-        "model": "grok-3-mini",
-        "model_env": "GROK_MODEL",
-        "key_env": "XAI_API_KEY",
-        "search": False,
-        "note": "xAI API，不联网；X 内嵌的 Grok 联网行为需在网页端采",
-    },
-    "perplexity": {
-        "name": "Perplexity", "market": "global",
-        "base": "https://api.perplexity.ai",
-        "model": "sonar",
-        "model_env": "PERPLEXITY_MODEL",
-        "key_env": "PERPLEXITY_API_KEY",
-        "search": True,
-        "note": "原生联网并返回 citations，海外采样里证据质量最好的一个",
-    },
+    code: {"name": name + " via Replicate", "market": market,
+           "key_env": "REPLICATE_API_TOKEN", "model": "", "search": False,
+           "note": "Pinned model API; not consumer AI-search visibility"}
+    for code, name, market in [
+        ("openai", "OpenAI", "global"), ("gemini", "Gemini", "global"),
+        ("grok", "Grok", "global"), ("claude", "Claude", "global"),
+        ("perplexity", "Perplexity", "global"), ("deepseek", "DeepSeek", "cn"),
+        ("glm", "GLM", "cn"), ("doubao", "Doubao", "cn"),
+        ("kimi", "Kimi", "cn"), ("minimax", "MiniMax", "cn")
+    ]
 }
 
 # 没有公开联网问答 API 的平台，只能浏览器/人工采
@@ -178,167 +91,25 @@ def questions_for(cfg: dict, platform: str) -> list[dict]:
     return out
 
 
-def _p_model(p: dict) -> str:
-    """调用时解析模型：环境变量覆盖优先，否则用注册表默认。
-
-    必须在调用时而不是 import 时解析——界面改完模型要立即生效，
-    清掉覆盖也要能回落到出厂默认。"""
-    menv = p.get("model_env")
-    return (os.environ.get(menv) if menv else None) or p["model"]
-
-
 def model_for(platform: str) -> str:
-    return _p_model(PROVIDERS[platform])
+    import replicate_gateway as gateway
+    return gateway.model_for(platform) or ""
 
 
 def available(platform: str) -> bool:
-    p = PROVIDERS.get(platform)
-    return bool(p and os.environ.get(p["key_env"]))
+    return bool(platform in PROVIDERS and os.environ.get("REPLICATE_API_TOKEN") and model_for(platform))
 
 
-# 所有「挑一个可用 LLM 干活」的模块（bootstrap/expand/generate）共用这一条候选链，
-# 避免各写一份后悄悄漂移。顺序：便宜的国内引擎优先。
-LLM_PREFS = ("deepseek", "glm", "doubao", "openai", "gemini")
+LLM_PREFS = ("openai", "gemini", "claude")
 
 
 def pick_llm(prefer: str | None = None):
-    """按候选链返回第一个配了 Key 的平台；都没配返回 None。"""
-    cands = [prefer] if prefer else list(LLM_PREFS)
-    return next((c for c in cands if c and available(c)), None)
+    return next((c for c in ([prefer] if prefer else LLM_PREFS) if c and available(c)), None)
 
 
-def ask_ark(p: dict, key: str, question: str, timeout: int) -> dict:
-    """火山方舟。优先用 Responses API + web_search；账号没开通内容插件就降级成普通对话。"""
-    H = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
-    try:
-        r = requests.post(f"{p['base']}/responses", headers=H,
-                          json={"model": _p_model(p), "input": question,
-                                "tools": [{"type": "web_search"}]}, timeout=timeout)
-        if r.status_code == 200:
-            d = r.json()
-            answer, refs = "", []
-            for item in d.get("output") or []:
-                for c in item.get("content") or []:
-                    if c.get("type") in ("output_text", "text"):
-                        answer += c.get("text", "")
-                    for ann in c.get("annotations") or []:
-                        if ann.get("url"):
-                            refs.append({"url": ann["url"], "title": ann.get("title", "")})
-                for res in item.get("results") or []:
-                    if isinstance(res, dict) and res.get("url"):
-                        refs.append({"url": res["url"], "title": res.get("title", "")})
-            if answer:
-                seen = set()
-                refs = [c for c in refs if not (c["url"] in seen or seen.add(c["url"]))]
-                return {"ok": True, "answer": answer, "citations": refs,
-                        "raw_model": _p_model(p), "searched": True}
-        elif "ToolNotOpen" not in r.text:
-            return {"ok": False, "answer": "", "error": f"HTTP {r.status_code}: {r.text[:300]}"}
-    except Exception:  # noqa: BLE001
-        pass  # 降级重试
-
-    try:  # 降级：不联网的普通对话
-        r = requests.post(f"{p['base']}/chat/completions", headers=H,
-                          json={"model": _p_model(p),
-                                "messages": [{"role": "user", "content": question}]}, timeout=timeout)
-        if r.status_code != 200:
-            return {"ok": False, "answer": "", "error": f"HTTP {r.status_code}: {r.text[:300]}"}
-        d = r.json()
-        return {"ok": True, "answer": d["choices"][0]["message"].get("content") or "",
-                "citations": [], "raw_model": _p_model(p), "searched": False}
-    except Exception as e:  # noqa: BLE001
-        return {"ok": False, "answer": "", "error": f"{type(e).__name__}: {e}"}
-
-
-def ask_anthropic(p: dict, key: str, question: str, timeout: int) -> dict:
-    """Anthropic 原生 Messages API：响应是 content 块列表；安全分类器拒答走 stop_reason。"""
-    delays = (1, 3)
-    for attempt in range(len(delays) + 1):
-        try:
-            r = requests.post(
-                f"{p['base']}/messages",
-                headers={"x-api-key": key, "anthropic-version": "2023-06-01",
-                         "content-type": "application/json"},
-                # max_tokens 4096：品牌认知问答的自然长度以内，同时护住 120s 请求超时
-                json={"model": _p_model(p), "max_tokens": 4096,
-                      "messages": [{"role": "user", "content": question}]},
-                timeout=timeout,
-            )
-            if r.status_code != 200:
-                if (r.status_code == 429 or r.status_code >= 500) and attempt < len(delays):
-                    time.sleep(delays[attempt])
-                    continue
-                return {"ok": False, "answer": "", "error": f"HTTP {r.status_code}: {r.text[:300]}"}
-            d = r.json()
-            if d.get("stop_reason") == "refusal":
-                return {"ok": False, "answer": "", "error": "安全分类器拒答（stop_reason=refusal）"}
-            answer = "".join(b.get("text", "") for b in d.get("content", [])
-                             if b.get("type") == "text")
-            return {"ok": True, "answer": answer, "citations": [],
-                    "raw_model": d.get("model", _p_model(p))}
-        except requests.exceptions.Timeout as e:
-            if attempt < len(delays):
-                time.sleep(delays[attempt])
-                continue
-            return {"ok": False, "answer": "", "error": f"{type(e).__name__}: {e}"}
-        except Exception as e:  # noqa: BLE001
-            return {"ok": False, "answer": "", "error": f"{type(e).__name__}: {e}"}
-
-
-def ask(platform: str, question: str, timeout: int = 120) -> dict:
-    p = PROVIDERS[platform]
-    key = os.environ.get(p["key_env"])
-    if not key:
-        return {"ok": False, "answer": "", "error": f"缺少环境变量 {p['key_env']}"}
-    if p.get("protocol") == "ark":
-        return ask_ark(p, key, question, timeout)
-    if p.get("protocol") == "anthropic":
-        return ask_anthropic(p, key, question, timeout)
-    body = {
-        "model": _p_model(p),
-        "messages": [{"role": "user", "content": question}],
-        "temperature": 0.7,
-    }
-    body.update(p.get("extra", {}))
-    delays = (1, 3)  # 超时/429/5xx 指数退避重试 2 次；其他错误（4xx 等）不重试
-    for attempt in range(len(delays) + 1):
-        try:
-            r = requests.post(
-                f"{p['base']}/chat/completions",
-                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-                json=body,
-                timeout=timeout,
-            )
-            if r.status_code != 200:
-                err = {"ok": False, "answer": "", "error": f"HTTP {r.status_code}: {r.text[:300]}"}
-                if (r.status_code == 429 or r.status_code >= 500) and attempt < len(delays):
-                    time.sleep(delays[attempt])
-                    continue
-                return err
-            data = r.json()
-            msg = data["choices"][0]["message"]
-            answer = msg.get("content") or ""
-            # 各家把联网来源放在不同字段：千问 search_info、Perplexity citations/search_results
-            refs = []
-            for item in (data.get("search_info") or {}).get("search_results", []) or []:
-                if item.get("url"):
-                    refs.append({"url": item["url"], "title": item.get("title", "")})
-            for item in data.get("search_results") or []:
-                if isinstance(item, dict) and item.get("url"):
-                    refs.append({"url": item["url"], "title": item.get("title", "")})
-            for u in data.get("citations") or []:
-                if isinstance(u, str):
-                    refs.append({"url": u, "title": ""})
-            seen = set()
-            refs = [c for c in refs if not (c["url"] in seen or seen.add(c["url"]))]
-            return {"ok": True, "answer": answer, "citations": refs, "raw_model": data.get("model", _p_model(p))}
-        except requests.exceptions.Timeout as e:
-            if attempt < len(delays):
-                time.sleep(delays[attempt])
-                continue
-            return {"ok": False, "answer": "", "error": f"{type(e).__name__}: {e}"}
-        except Exception as e:  # noqa: BLE001
-            return {"ok": False, "answer": "", "error": f"{type(e).__name__}: {e}"}
+def ask(platform: str, question: str, timeout: int = 120, request_key=None) -> dict:
+    import replicate_gateway as gateway
+    return gateway.ask(platform, question, timeout, request_key=request_key)
 
 
 # ------------------------------------------------------------ 答案解析
@@ -486,14 +257,26 @@ def dedup_rows(rows: list[dict]) -> list[dict]:
     """同日重跑/重复导入去重：按 (platform, question_id, round, sample_mode) 保留最后一条。"""
     seen: dict[tuple, dict] = {}
     for r in rows:
-        seen[(r.get("platform"), r.get("question_id"), r.get("round"), r.get("sample_mode"))] = r
+        seen[(r.get("platform"), r.get("question_id"), r.get("round"), r.get("sample_mode"),
+              r.get("requested_model") or r.get("raw_model"), r.get("method_version"),
+              r.get("question_set_version"), r.get("cycle_id"), r.get("search_enabled"), r.get("sampling_config_fingerprint"), r.get("question_set_hash"))] = r
     return list(seen.values())
 
 
 def aggregate(rows: list[dict], cfg: dict) -> dict:
     by_platform: dict[str, list[dict]] = {}
+    identities = {}
     for r in rows:
-        by_platform.setdefault(r["platform"], []).append(r)
+        identity = (r.get("requested_model") or r.get("raw_model"), r.get("method_version"),
+                    r.get("question_set_version"), r.get("terminal_class"), r.get("search_enabled"), r.get("sampling_config_fingerprint"), r.get("question_set_hash"))
+        identities.setdefault(r["platform"], set()).add(identity)
+    for r in rows:
+        key = r["platform"]
+        if len(identities[key]) > 1:
+            identity = (r.get("requested_model") or r.get("raw_model"), r.get("method_version"),
+                        r.get("question_set_version"), r.get("terminal_class"), r.get("search_enabled"), r.get("sampling_config_fingerprint"), r.get("question_set_hash"))
+            key += "@" + __import__("hashlib").sha256(repr(identity).encode()).hexdigest()[:12]
+        by_platform.setdefault(key, []).append(r)
 
     out = {}
     for plat, all_rs in by_platform.items():
@@ -503,8 +286,8 @@ def aggregate(rows: list[dict], cfg: dict) -> dict:
         # 可能来自旧版误判，只在缺 question 时回退旧字段。
         probe = [
             r for r in all_rs
-            if (brand_in_question(r.get("question", ""), cfg)
-                if r.get("question") else bool(r.get("brand_in_question")))
+            if (r["question_intent"] == "brand" if r.get("question_intent") else
+                (brand_in_question(r.get("question", ""), cfg) if r.get("question") else bool(r.get("brand_in_question"))))
         ]
         rs = [r for r in all_rs if r not in probe]
         # 绝不回退：某平台只采了点名题时，可见性指标就是「未测」（None），
@@ -524,14 +307,18 @@ def aggregate(rows: list[dict], cfg: dict) -> dict:
                 dom[d] = dom.get(d, 0) + 1
         out[plat] = {
             "market": market,
-            "label": label_of(plat),
+            "label": label_of(all_rs[0]["platform"]),
+            "model": all_rs[0].get("raw_model"),
+            "method_version": all_rs[0].get("method_version"),
             "samples": n,
             "citation_samples": len(citation_rs),
+            "top1_rate": None, "top3_rate": None, "avg_rank": None,
+            "rank_limit": "Registered-name occurrence order is not recommendation ranking.",
             "search_enabled": bool(citation_rs),
             "mention_rate": round(len(mentioned) / n, 3) if n else None,
-            "top1_rate": round(sum(1 for r in mentioned if r["analysis"]["brand_rank"] == 1) / n, 3) if n else None,
-            "top3_rate": round(sum(1 for r in mentioned if 1 <= r["analysis"]["brand_rank"] <= 3) / n, 3) if n else None,
-            "avg_rank": round(sum(ranks) / len(ranks), 2) if ranks else None,
+            "registered_brand_first_occurrence_rate": round(sum(1 for r in mentioned if r["analysis"]["brand_rank"] == 1) / n, 3) if n else None,
+            "registered_brand_first_three_occurrence_rate": round(sum(1 for r in mentioned if 1 <= r["analysis"]["brand_rank"] <= 3) / n, 3) if n else None,
+            "registered_brand_mean_occurrence_order": round(sum(ranks) / len(ranks), 2) if ranks else None,
             "own_domain_cite_rate": (
                 round(sum(1 for r in citation_rs if r["analysis"]["own_domain_cited"])
                       / len(citation_rs), 3)
@@ -607,10 +394,24 @@ def run(slug: str, platforms: list[str] | None = None, repeat: int = 1, limit: i
     path = pdir / "samples" / f"{G.today()}.jsonl"
     path.parent.mkdir(parents=True, exist_ok=True)
 
+    if cfg.get("cycle_id"):
+        history = []
+        for previous in sorted(path.parent.glob("*.jsonl"))[-30:]:
+            history.extend(G.read_jsonl(previous))
+        success = {(r.get("platform"), r.get("question_id"), r.get("round"))
+            for r in dedup_rows(history) if r.get("ok")
+            and r.get("cycle_id") == cfg["cycle_id"]
+            and r.get("method_version") == cfg.get("method_version")
+            and r.get("question_set_version") == cfg.get("question_set_version")
+            and r.get("requested_model") == model_for(r.get("platform"))
+            and r.get("question_set_hash") == cfg.get("question_set_hash")
+            and r.get("sampling_config_fingerprint") == cfg.get("sampling_fingerprints",{}).get(r.get("platform"))}
+        jobs = [j for j in jobs if (j[0], j[1]["id"], j[2]) not in success]
+
     def one(job):
         plat, q, rnd = job
         t0 = time.monotonic()
-        res = ask(plat, q["text"])
+        res = ask(plat, q["text"], request_key=f"{cfg['cycle_id']}:{plat}:{q['id']}:{rnd}") if cfg.get("cycle_id") else ask(plat, q["text"])
         elapsed_ms = int((time.monotonic() - t0) * 1000)
         rec = {
             "date": G.today(), "ts": G.now_iso(),
@@ -619,6 +420,16 @@ def run(slug: str, platforms: list[str] | None = None, repeat: int = 1, limit: i
             "evidence_level": "B_api_可复现",
             "search_enabled": res.get("searched", PROVIDERS[plat].get("search", False)),
             "raw_model": res.get("raw_model"),
+            "requested_model": res.get("requested_model") or model_for(plat),
+            "gateway": "replicate", "terminal_class": "model_api_closed_book",
+            "method_version": cfg.get("method_version", "replicate-closed-book-v1"),
+            "question_set_version": cfg.get("question_set_version"),
+            "cycle_id": cfg.get("cycle_id"), "question_intent": q.get("intent"),
+            "question_set_hash": cfg.get("question_set_hash"),
+            "sampling_config_fingerprint": res.get("sampling_config_fingerprint") or cfg.get("sampling_fingerprints",{}).get(plat),
+            "usage": res.get("usage"), "generation_id": res.get("generation_id"),
+            "budget_request_id": res.get("budget_request_id"),
+            "cost_status": res.get("cost_status"), "estimated_cost_usd": res.get("estimated_cost_usd"), "model_version": res.get("model_version"),
             "question_id": q.get("id"), "question": q["text"], "round": rnd,
             "brand_in_question": brand_in_question(q["text"], cfg),
             "ok": res["ok"], "error": res.get("error"),

@@ -117,3 +117,12 @@ class TestLocaleStratifiedCandidates(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class RegisteredCoreTests(unittest.TestCase):
+ def test_core_not_dropped_by_generic_rank_or_locale(self):
+  root='https://example.com';core=root+'/ai-video-generator'
+  pool=crawl.rank([root+'/pricing',root+'/about',root+'/zh/about',core],root)
+  result=crawl.select_candidates([root,core],root,pool,3)
+  self.assertIn(core,result);self.assertIn(root,result);self.assertEqual(len(result),3)
+ def test_core_capacity_fails_explicitly(self):
+  with self.assertRaises(ValueError):crawl.select_candidates(['https://x.test/core'],'https://x.test',['https://x.test'],1)

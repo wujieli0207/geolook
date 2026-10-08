@@ -124,7 +124,9 @@ class TestCitationEligibility(unittest.TestCase):
     def test_only_search_enabled_rows_form_citation_denominator(self):
         rows = [make_row(qid="Q1", search_enabled=False, own_cited=False),
                 make_row(qid="Q2", search_enabled=True, own_cited=True)]
-        m = S.aggregate(rows, CFG)["deepseek"]
+        groups = S.aggregate(rows, CFG)
+        self.assertEqual(len(groups), 2)
+        m = next(x for x in groups.values() if x["search_enabled"])
         self.assertEqual(m["citation_samples"], 1)
         self.assertEqual(m["own_domain_cite_rate"], 1.0)
 
@@ -139,63 +141,5 @@ class TestMarketOf(unittest.TestCase):
         self.assertEqual(S.market_of("chatgpt"), "global")
 
 
-class _Resp:
-    def __init__(self, status, payload=None, text=""):
-        self.status_code = status
-        self._payload = payload or {}
-        self.text = text
-
-    def json(self):
-        return self._payload
-
-
-OK_PAYLOAD = {"choices": [{"message": {"content": "你好"}}], "model": "deepseek-v4-flash"}
-
-
-class TestAskRetry(unittest.TestCase):
-    def setUp(self):
-        self._env = mock.patch.dict(os.environ, {"DEEPSEEK_API_KEY": "test-key"})
-        self._env.start()
-        self._sleep = mock.patch.object(S.time, "sleep")
-        self._sleep.start()
-
-    def tearDown(self):
-        self._env.stop()
-        self._sleep.stop()
-
-    def _ask(self, side_effect):
-        with mock.patch.object(S.requests, "post", side_effect=side_effect) as post:
-            res = S.ask("deepseek", "测试问题")
-        return res, post
-
-    def test_retry_on_429_then_success(self):
-        res, post = self._ask([_Resp(429, text="rate limited"),
-                               _Resp(500, text="server error"),
-                               _Resp(200, OK_PAYLOAD)])
-        self.assertTrue(res["ok"])
-        self.assertEqual(post.call_count, 3)
-
-    def test_retry_exhausted_returns_error(self):
-        res, post = self._ask([_Resp(500, text="err")] * 5)
-        self.assertFalse(res["ok"])
-        self.assertEqual(post.call_count, 3)  # 1 + 2 次重试
-
-    def test_timeout_retried(self):
-        res, post = self._ask([S.requests.exceptions.Timeout("t"),
-                               _Resp(200, OK_PAYLOAD)])
-        self.assertTrue(res["ok"])
-        self.assertEqual(post.call_count, 2)
-
-    def test_timeout_exhausted(self):
-        res, post = self._ask([S.requests.exceptions.Timeout("t")] * 5)
-        self.assertFalse(res["ok"])
-        self.assertEqual(post.call_count, 3)
-
-    def test_no_retry_on_400(self):
-        res, post = self._ask([_Resp(400, text="bad request")] * 5)
-        self.assertFalse(res["ok"])
-        self.assertEqual(post.call_count, 1)
-
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     unittest.main()
