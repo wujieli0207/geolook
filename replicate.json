@@ -1,0 +1,52 @@
+{
+  "gateway": "replicate",
+  "method_version": "replicate-closed-book-v1",
+  "models": {
+    "openai": "openai/gpt-5.6-luna",
+    "gemini": "google/gemini-3.5-flash",
+    "claude": "anthropic/claude-sonnet-5"
+  },
+  "max_output_tokens": 2048,
+  "monthly_budget_cny": null,
+  "budget_cny_per_usd": 8,
+  "ledger_path": "~/.webdata/geolook/replicate-ledger.json",
+  "historical_ledgers": [
+    "~/.webdata/geolook/openrouter-ledger.json"
+  ],
+  "model_settings": {
+    "openai/gpt-5.6-luna": {
+      "input": {
+        "reasoning_effort": "none"
+      },
+      "output_cap_field": "max_completion_tokens",
+      "input_usd_per_million": 1,
+      "output_usd_per_million": 6,
+      "pricing_verified_at": "2026-09-16",
+      "pricing_source": "https://replicate.com/openai/gpt-5.6-luna",
+      "schema_sha256": "fa360d36413b7f18502ddd2e8ffde55064c4ea939aefe78adb51107744bfe833"
+    },
+    "google/gemini-3.5-flash": {
+      "input": {
+        "thinking_level": "none"
+      },
+      "output_cap_field": "max_output_tokens",
+      "input_usd_per_million": 1.5,
+      "output_usd_per_million": 9,
+      "pricing_verified_at": "2026-09-16",
+      "pricing_source": "https://replicate.com/google/gemini-3.5-flash",
+      "schema_sha256": "749f7aa7b1f493a6f142d44e2f07445f10b06d77c9bc711c02751d9ed09c1778"
+    },
+    "anthropic/claude-sonnet-5": {
+      "input": {
+        "effort": "low"
+      },
+      "output_cap_field": "max_tokens",
+      "input_usd_per_million": 2,
+      "output_usd_per_million": 10,
+      "pricing_verified_at": "2026-09-16",
+      "pricing_source": "https://replicate.com/anthropic/claude-sonnet-5",
+      "schema_sha256": "b8fb7e120df939c94578a5795a36ecfa85e9a02b83cc0beb27feb8f738d60656"
+    }
+  },
+  "spend_policy": "uncapped"
+}

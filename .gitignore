@@ -8,3 +8,4 @@ docs/plans/
 web/
 nohup.out
 .claude/
+.venv/

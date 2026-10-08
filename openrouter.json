@@ -1,0 +1,13 @@
+{
+  "gateway": "openrouter",
+  "method_version": "openrouter-closed-book-v1",
+  "models": {
+    "openai": "openai/gpt-4o-mini",
+    "gemini": "google/gemini-2.5-flash",
+    "grok": "x-ai/grok-4.3"
+  },
+  "max_output_tokens": 2048,
+  "monthly_budget_cny": 300,
+  "budget_cny_per_usd": 8,
+  "ledger_path": "~/.webdata/geolook/openrouter-ledger.json"
+}
